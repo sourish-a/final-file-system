@@ -83,6 +83,11 @@ type User struct {
 	Masterkey []byte
 	Privdsk DSSignKey
 	PrivRSA PKEDecKey
+	Signature []byte
+	Files map[string]File
+	SharedFiles map[string]File
+	DecKeys map[string]
+
 
 	
 	// You can add other fields here if you want...
@@ -108,7 +113,8 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	userdata.PrivRSA, pubRSA = PKEKeyGen()
 	var pubDSK DSVerifyKey
 	userdata.Privdsk, pubDSK = DSKeyGen()
-	
+	toJson, _ := json.Marshal(userdata)
+	signature := DSSign(userdata.Privdsk, toJson)
 	//Extra fields needed
 
 	userUUID := uuid.FromBytes(Hash(username))
