@@ -79,7 +79,6 @@ func bytesToUUID(data []byte) (ret uuid.UUID) {
 // User is the structure definition for a user record.
 type User struct {
 	Username string
-	Password_hash string
 	Masterkey []byte
 	Privdsk DSSignKey
 	PrivRSA PKEDecKey
@@ -107,19 +106,19 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 		return nil, "User already exists"
 	}
 	userdata.Username = username
-	userdata.Password_hash = Hash(password + Hash(username))
-	userdata.Masterkey = RandomBytes(16)
-	var pubRSA PKEEncKey
-	userdata.PrivRSA, pubRSA = PKEKeyGen()
-	var pubDSK DSVerifyKey
-	userdata.Privdsk, pubDSK = DSKeyGen()
+	userdata.Masterkey = Argon2Key(password, Hash(username), 16)
+	userdata.PrivRSA, pubRSA := PKEKeyGen()
+	userdata.Privdsk, pubDSK := DSKeyGen()
 	toJson, _ := json.Marshal(userdata)
-	signature := DSSign(userdata.Privdsk, toJson)
-	//Extra fields needed
-
+	iv := RandomBytes(16)
+	jsonEnc := SymEnc(userdata.Masterkey, iv, toJson)
 	userUUID := uuid.FromBytes(Hash(username))
-	
-
+	userlib.DatastoreSet(userUUID, jsonEnc)
+	userlib.KeystoreSet("RSA" + username , pubRSA)
+	userlib.KeystoreSet("DSK" + username , pubDSK)
+	signature := DSSign(userdata.Privdsk, jsonEnc)
+	hmacKey := HashKDF(userdata.Masterkey, []byte("hmac key"))
+	hmac := HMACEval(hmacKey, toJson)
 	//End of toy implementation
 
 	return &userdata, nil
@@ -130,6 +129,16 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 func GetUser(username string, password string) (userdataptr *User, err error) {
 	var userdata User
 	userdataptr = &userdata
+	userUUID := uuid.FromBytes(Hash(username))
+	encJson, exists := userlib.DatastoreGet(userUUID)
+	if exists != true {
+		panic("username does not exist")
+		return nil, "username does not exist"
+	}
+	master := Argon2Key(password, Hash(username), 16)
+	//make check for if not able to unencrypt
+	unEncJson := SymDec(master, encJson)
+	json.Unmarshal(unEncJson, userdataptr)
 
 	return userdataptr, nil
 }
