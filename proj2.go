@@ -81,8 +81,8 @@ type User struct {
 	Username string
 	Password_hash string
 	Masterkey []byte
-	Privdsk []byte
-	PrivRSA []byte
+	Privdsk DSSignKey
+	PrivRSA PKEDecKey
 
 	
 	// You can add other fields here if you want...
@@ -96,8 +96,7 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	userdataptr = &userdata
 
 	//TODO: This is a toy implementation.
-
-	getuser, userExists := userlib.DatastoreGet(Hash(username))
+	getuser, userExists := userlib.DatastoreGet(uuid.FromBytes(Hash(username)))
 	if userExists == true {
 		panic("User already exists")
 		return nil, "User already exists"
@@ -105,7 +104,14 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	userdata.Username = username
 	userdata.Password_hash = Hash(password + Hash(username))
 	userdata.Masterkey = RandomBytes(16)
-	userdata.PrivRSA, pubRSA := PKEKeyGen()
+	var pubRSA PKEEncKey
+	userdata.PrivRSA, pubRSA = PKEKeyGen()
+	var pubDSK DSVerifyKey
+	userdata.Privdsk, pubDSK = DSKeyGen()
+	
+	//Extra fields needed
+
+	userUUID := uuid.FromBytes(Hash(username))
 	
 
 	//End of toy implementation
