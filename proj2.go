@@ -82,7 +82,6 @@ type User struct {
 	Masterkey []byte
 	Privdsk DSSignKey
 	PrivRSA PKEDecKey
-	Signature []byte
 	Files map[string]File
 	SharedFiles map[string]File
 	DecKeys map[string]
@@ -92,6 +91,14 @@ type User struct {
 	// You can add other fields here if you want...
 	// Note for JSON to marshal/unmarshal, the fields need to
 	// be public (start with a capital letter)
+}
+
+type OwnedFiles struct {
+
+}
+
+type File struct {
+
 }
 
 // InitUser will be called a single time to initialize a new user.
@@ -113,12 +120,10 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	iv := RandomBytes(16)
 	jsonEnc := SymEnc(userdata.Masterkey, iv, toJson)
 	userUUID := uuid.FromBytes(Hash(username))
-	userlib.DatastoreSet(userUUID, jsonEnc)
 	userlib.KeystoreSet("RSA" + username , pubRSA)
 	userlib.KeystoreSet("DSK" + username , pubDSK)
 	signature := DSSign(userdata.Privdsk, jsonEnc)
-	hmacKey := HashKDF(userdata.Masterkey, []byte("hmac key"))
-	hmac := HMACEval(hmacKey, toJson)
+	userlib.DatastoreSet(userUUID, jsonEnc + signature)
 	//End of toy implementation
 
 	return &userdata, nil
@@ -130,16 +135,25 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 	var userdata User
 	userdataptr = &userdata
 	userUUID := uuid.FromBytes(Hash(username))
-	encJson, exists := userlib.DatastoreGet(userUUID)
+	retrieved, exists := userlib.DatastoreGet(userUUID)
 	if exists != true {
 		panic("username does not exist")
 		return nil, "username does not exist"
 	}
+	signature := retrieved[len(encJson) - 256:]
+	encJson := retrieved[:len(encJson) - 256]
+	pubRSA := KeystoreGet("RSA" + username)
+	if DSVerify(pubRSA, encJson, signature) {
+		panic("Data has been tampered with!!")
+		return nil, "Data has been tampered with!"
+	}
 	master := Argon2Key(password, Hash(username), 16)
-	//make check for if not able to unencrypt
 	unEncJson := SymDec(master, encJson)
-	json.Unmarshal(unEncJson, userdataptr)
-
+	errorExists := json.Unmarshal(unEncJson, userdataptr)
+	if errorExists {
+		panic("incorrect password")
+		return nil, "incorrect password"
+	}
 	return userdataptr, nil
 }
 
