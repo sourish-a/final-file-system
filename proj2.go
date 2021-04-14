@@ -82,7 +82,7 @@ type User struct {
 	Masterkey []byte
 	Privdsk DSSignKey
 	PrivRSA PKEDecKey
-	Namespace map[string]string //maps hash of filename to UUID of where File struct exists
+	Namespace map[string]FileFrame //maps hash of filename to UUID of where File struct exists
 
 	// You can add other fields here if you want...
 	// Note for JSON to marshal/unmarshal, the fields need to
@@ -90,10 +90,12 @@ type User struct {
 }
 
 type FileFrame struct {
+	IsOwner bool
 	FileUUID uuid.UUID //set to 0 unless owner, points to File struct
 	SymmKey []byte // set to 0 unless owner
 	SharedUsers map[string]string //maps username to acccess tokens for all shared users; exclusive to owner
 	SharedFrame uuid.UUID //points to SharedFileFrame, only for shared users
+	AccessToken []byte // set to 0 if owner, otherwise the key used to decrypt SharedFileFrame 
 }
 
 type File struct {
@@ -105,8 +107,9 @@ type File struct {
 
 //intermediate struct between FileFrame and File, exclusive to non-owners
 type SharedFileFrame struct { // will be encryped and MAC'd by access token for user
-	SymmKey []byte
-	SharedFileUUID uuid.UUID //UUID that points to the File struct
+	SymmKey []byte //decrypt/encrypt key for FIle struct, changed when access is revoked to other user
+	SharedFileUUID uuid.UUID //UUID that points to the File struct, changed when access is revoked to other user
+	Revoked bool //true if their file access is revoked
 }
 
 type Invite struct {
@@ -137,7 +140,7 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	userlib.KeystoreSet("DSK" + username , pubDSK)
 	signature := DSSign(userdata.Privdsk, jsonEnc)
 	userlib.DatastoreSet(userUUID, jsonEnc + signature)
-	Namespace = make(map[string]string)
+	Namespace = make(map[string]FileFrame)
 	
 	userlib.DatastoreSet()
 	//End of toy implementation
