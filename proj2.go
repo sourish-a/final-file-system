@@ -82,17 +82,41 @@ type User struct {
 	Masterkey []byte
 	Privdsk DSSignKey
 	PrivRSA PKEDecKey
-	Signature []byte
-	Files map[string]File
-	SharedFiles map[string]File
-	DecKeys map[string]
+	Namespace map[string]FileFrame //maps hash of filename to UUID of where File struct exists
 
-
-	
 	// You can add other fields here if you want...
 	// Note for JSON to marshal/unmarshal, the fields need to
 	// be public (start with a capital letter)
 }
+
+type FileFrame struct {
+	IsOwner bool
+	FileUUID uuid.UUID //set to 0 unless owner, points to File struct
+	SymmKey []byte // set to 0 unless owner
+	SharedUsers map[string]string //maps username to acccess tokens for all shared users; exclusive to owner
+	SharedFrame uuid.UUID //points to SharedFileFrame, only for shared users
+	AccessToken []byte // set to 0 if owner, otherwise the key used to decrypt SharedFileFrame 
+}
+
+type File struct {
+	FileUUID uuid.UUID
+	Owner string
+
+
+}
+
+//intermediate struct between FileFrame and File, exclusive to non-owners
+type SharedFileFrame struct { // will be encryped and MAC'd by access token for user
+	SymmKey []byte //decrypt/encrypt key for FIle struct, changed when access is revoked to other user
+	SharedFileUUID uuid.UUID //UUID that points to the File struct, changed when access is revoked to other user
+	Revoked bool //true if their file access is revoked
+}
+
+type Invite struct {
+	SharedFileUUID uuid.UUID //UUID of the SharedFileFrame
+	Accessor []byte //encryption/decryption key to decrypt SharedFileFrame
+}
+
 
 // InitUser will be called a single time to initialize a new user.
 func InitUser(username string, password string) (userdataptr *User, err error) {
@@ -113,12 +137,13 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	iv := RandomBytes(16)
 	jsonEnc := SymEnc(userdata.Masterkey, iv, toJson)
 	userUUID := uuid.FromBytes(Hash(username))
-	userlib.DatastoreSet(userUUID, jsonEnc)
 	userlib.KeystoreSet("RSA" + username , pubRSA)
 	userlib.KeystoreSet("DSK" + username , pubDSK)
 	signature := DSSign(userdata.Privdsk, jsonEnc)
-	hmacKey := HashKDF(userdata.Masterkey, []byte("hmac key"))
-	hmac := HMACEval(hmacKey, toJson)
+	userlib.DatastoreSet(userUUID, jsonEnc + signature)
+	Namespace = make(map[string]FileFrame)
+	
+	userlib.DatastoreSet()
 	//End of toy implementation
 
 	return &userdata, nil
@@ -130,16 +155,25 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 	var userdata User
 	userdataptr = &userdata
 	userUUID := uuid.FromBytes(Hash(username))
-	encJson, exists := userlib.DatastoreGet(userUUID)
+	retrieved, exists := userlib.DatastoreGet(userUUID)
 	if exists != true {
 		panic("username does not exist")
 		return nil, "username does not exist"
 	}
+	signature := retrieved[len(encJson) - 256:]
+	encJson := retrieved[:len(encJson) - 256]
+	pubRSA := KeystoreGet("RSA" + username)
+	if DSVerify(pubRSA, encJson, signature) {
+		panic("Data has been tampered with!!")
+		return nil, "Data has been tampered with!"
+	}
 	master := Argon2Key(password, Hash(username), 16)
-	//make check for if not able to unencrypt
 	unEncJson := SymDec(master, encJson)
-	json.Unmarshal(unEncJson, userdataptr)
-
+	errorExists := json.Unmarshal(unEncJson, userdataptr)
+	if errorExists {
+		panic("incorrect password")
+		return nil, "incorrect password"
+	}
 	return userdataptr, nil
 }
 
