@@ -141,7 +141,7 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	signature := DSSign(userdata.Privdsk, jsonEnc)
 	userlib.DatastoreSet(userUUID, jsonEnc + signature)
 	Namespace = make(map[string]FileFrame)
-	
+	//should also MAC this using Masterkey
 	userlib.DatastoreSet()
 	//End of toy implementation
 
