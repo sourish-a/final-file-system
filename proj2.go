@@ -80,8 +80,8 @@ func bytesToUUID(data []byte) (ret uuid.UUID) {
 type User struct {
 	Username string
 	Masterkey []byte
-	Privdsk DSSignKey
-	PrivRSA PKEDecKey
+	Privdsk userlib.DSSignKey
+	PrivRSA userlib.PKEDecKey
 	Namespace map[string]FileFrame //maps hash of filename to UUID of where File struct exists
 
 	// You can add other fields here if you want...
@@ -129,28 +129,30 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	userdataptr = &userdata
 
 	//TODO: This is a toy implementation.
-	getuser, userExists := userlib.DatastoreGet(uuid.FromBytes(Hash(username)))
+	userUUID, _ := uuid.FromBytes(userlib.Hash([]byte(username)))
+	getuser, userExists := userlib.DatastoreGet(userUUID)
 	if userExists == true {
 		panic("User already exists")
-		return nil, "User already exists"
+		return nil, errors.New("User already exists")
 	}
 	userdata.Username = username
-	userdata.Masterkey = Argon2Key(password, Hash(username), 16)
-	userdata.PrivRSA, pubRSA := PKEKeyGen()
-	userdata.Privdsk, pubDSK := DSKeyGen()
-	hmacKey := HashKDF(userdata.Masterkey, []byte("hmac"))
+	userdata.Masterkey = userlib.Argon2Key([]byte(password), userlib.Hash([]byte(username)), 16)
+	var pubRSA userlib.PKEEncKey
+	var pubDSK userlib.DSVerifyKey
+	pubRSA, userdata.PrivRSA, _ = userlib.PKEKeyGen()
+	userdata.Privdsk, pubDSK, _ = userlib.DSKeyGen()
+	hmacKey, _ := userlib.HashKDF(userdata.Masterkey, []byte("hmac"))
 	userdata.Namespace = make(map[string]FileFrame)
 	toJson, _ := json.Marshal(userdata)
-	iv := RandomBytes(16)
-	jsonEnc := SymEnc(userdata.Masterkey, iv, toJson)
-	userUUID := uuid.FromBytes(Hash(username))
+	iv := userlib.RandomBytes(16)
+	jsonEnc := userlib.SymEnc(userdata.Masterkey, iv, toJson)
 	userlib.KeystoreSet("RSA" + username , pubRSA)
 	userlib.KeystoreSet("DSK" + username , pubDSK)
-	signature := DSSign(userdata.Privdsk, jsonEnc)
-	hmac := HMACEval(hmacKey, jsonEnc)
-	userlib.DatastoreSet(userUUID, jsonEnc + signature + hmac)
-	//should also MAC this using Masterkey
-	userlib.DatastoreSet()
+	signature, _ := userlib.DSSign(userdata.Privdsk, jsonEnc)
+	hmac, _ := userlib.HMACEval(hmacKey, jsonEnc)
+	sigAndHmac := append(signature, hmac...)
+	finalJson := append(jsonEnc, sigAndHmac...)
+	userlib.DatastoreSet(userUUID, finalJson)
 	//End of toy implementation
 
 	return &userdata, nil
@@ -161,31 +163,31 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 func GetUser(username string, password string) (userdataptr *User, err error) {
 	var userdata User
 	userdataptr = &userdata
-	userUUID := uuid.FromBytes(Hash(username))
+	userUUID, _ := uuid.FromBytes(userlib.Hash([]byte(username)))
 	retrieved, exists := userlib.DatastoreGet(userUUID) // retrieved = encJson + signature + hmac
 	if exists != true {
 		panic("username does not exist")
-		return nil, "username does not exist"
+		return nil, errors.New("username does not exist")
 	}
 	hmac := retrieved[len(retrieved) - 64:]
 	signature := retrieved[len(retrieved) - 320:len(retrieved) - 64]
 	encJson := retrieved[:len(retrieved) - 320]
-	pubRSA := KeystoreGet("RSA" + username)
-	if DSVerify(pubRSA, encJson, signature) {
+	pubRSA, _ := userlib.KeystoreGet("RSA" + username)
+	if userlib.DSVerify(pubRSA, encJson, signature) {
 		panic("Data has been tampered with!!")
-		return nil, "Data has been tampered with!"
+		return nil, errors.New("Data has been tampered with!")
 	}
 	master := Argon2Key(password, Hash(username), 16)
 	hmacCheck := HMACEval(HashKDF(master, "hmac"), encJson)
 	if !HMACEqual(hmacCheck, hmac) {
 		panic("Data has been tampered with!!")
-		return nil, "Data has been tampered with!!"
+		return nil, errors.New("Data has been tampered with!!")
 	}
 	unEncJson := SymDec(master, encJson)
 	errorExists := json.Unmarshal(unEncJson, userdataptr)
 	if errorExists {
 		panic("incorrect password")
-		return nil, "incorrect password"
+		return nil, errors.New("incorrect password")
 	}
 	return userdataptr, nil
 }
@@ -199,19 +201,32 @@ func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 	jsonData, _ := json.Marshal(data)
 	userlib.DatastoreSet(storageKey, jsonData)
 	//End of toy implementation
-	fileframe := userdata.Namespace(Hash(filename))
+	hashFName := Hash([]byte(filename))
+	fileframe := userdata.Namespace(hashFName)
 	if fileframe != nil {
 		if fileframe.IsOwner == true {
-			fileUUID := fileframe.
+			panic("delete me")
+			//fileUUID := fileframe.
 		} else {
+			panic("delete me")
 			//not owner
 		}
 	} else {
 		//file not in namespace
-		fileUUID := RandomBytes(16)
-		fileSymmKey := HashKDF(userdata.Masterkey, RandomBytes(16))
+		fileUUID := userlib.RandomBytes(16)
+		fileSymmKey := userlib.HashKDF(userdata.Masterkey, userlib.RandomBytes(16))
 		newFileframe := FileFrame{true, fileUUID, fileSymmKey, make(map[string]string), 0, nil}
-		newFile := File{}
+		userdata.Namespace[hashFname] := newFileFrame
+		newAppend := AppendNode{data, nil, 1}
+		appendUUID := userlib.RandomBytes(16)
+		appendKey := userlib.HKDF(fileSymmKey, 1)
+		jsonAppend, _ := json.Marshal(newAppend)
+		encAppend := userlib.SymEnc(appendKey, jsonAppend)
+		hmacAppendKey := userlib.HKDF(appendKey, []byte("hmac"))
+		hmacAppend := userlib.HMACEval(hmacAppendKey, encAppend)
+		appendAndHmac := append(encAppend, hmacAppend...)
+		userlib.DatastoreSet(appendUUID, appendAndHmac)
+		newFile := File{1, appendUUID, appendUUID}
 	}
 	// Load the namespace map from the datastore using UUID
 	// If the filename exists in the namespace:
@@ -236,7 +251,6 @@ func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 	//		Encrypt + Mac and save FileStruct at new FileStructUUID
 
 	hashedFilename := Hash(filename)
-	userdata.
 
 	return
 }
@@ -345,3 +359,5 @@ func (userdata *User) RevokeFile(filename string, targetUsername string) (err er
 	// remove user from FileFrameStruct.user/uuid_map
 	return
 }
+
+func (userdata *User) 
