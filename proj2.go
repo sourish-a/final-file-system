@@ -129,8 +129,8 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	userdataptr = &userdata
 
 	//TODO: This is a toy implementation.
-	userUUID, _ := uuid.FromBytes(userlib.Hash([]byte(username)))
-	getuser, userExists := userlib.DatastoreGet(userUUID)
+	userUUID, _ := uuid.FromBytes(userlib.Hash([]byte(username))[:16])
+	_, userExists := userlib.DatastoreGet(userUUID)
 	if userExists == true {
 		panic("User already exists")
 		return nil, errors.New("User already exists")
@@ -163,7 +163,7 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 func GetUser(username string, password string) (userdataptr *User, err error) {
 	var userdata User
 	userdataptr = &userdata
-	userUUID, _ := uuid.FromBytes(userlib.Hash([]byte(username)))
+	userUUID, _ := uuid.FromBytes(userlib.Hash([]byte(username))[:16])
 	retrieved, exists := userlib.DatastoreGet(userUUID) // retrieved = encJson + signature + hmac
 	if exists != true {
 		panic("username does not exist")
@@ -173,19 +173,20 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 	signature := retrieved[len(retrieved) - 320:len(retrieved) - 64]
 	encJson := retrieved[:len(retrieved) - 320]
 	pubRSA, _ := userlib.KeystoreGet("RSA" + username)
-	if userlib.DSVerify(pubRSA, encJson, signature) {
+	if userlib.DSVerify(pubRSA, encJson, signature) != nil {
 		panic("Data has been tampered with!!")
 		return nil, errors.New("Data has been tampered with!")
 	}
-	master := Argon2Key(password, Hash(username), 16)
-	hmacCheck := HMACEval(HashKDF(master, "hmac"), encJson)
-	if !HMACEqual(hmacCheck, hmac) {
+	master := userlib.Argon2Key([]byte(password), userlib.Hash([]byte(username)), 16)
+	hmacKey, _ := userlib.HashKDF(master, []byte("hmac"))
+	hmacCheck, _ := userlib.HMACEval(hmacKey, encJson)
+	if !userlib.HMACEqual(hmacCheck, hmac) {
 		panic("Data has been tampered with!!")
 		return nil, errors.New("Data has been tampered with!!")
 	}
-	unEncJson := SymDec(master, encJson)
+	unEncJson := userlib.SymDec(master, encJson)
 	errorExists := json.Unmarshal(unEncJson, userdataptr)
-	if errorExists {
+	if errorExists != nil {
 		panic("incorrect password")
 		return nil, errors.New("incorrect password")
 	}
@@ -195,38 +196,35 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 // StoreFile is documented at:
 // https://cs161.org/assets/projects/2/docs/client_api/storefile.html
 func (userdata *User) StoreFile(filename string, data []byte) (err error) {
-
-	//TODO: This is a toy implementation.
-	storageKey, _ := uuid.FromBytes([]byte(filename + userdata.Username)[:16])
-	jsonData, _ := json.Marshal(data)
-	userlib.DatastoreSet(storageKey, jsonData)
 	//End of toy implementation
-	hashFName := Hash([]byte(filename))
-	fileframe := userdata.Namespace(hashFName)
-	if fileframe != nil {
+	hashFName := userlib.Hash([]byte(filename))
+	if _, ok := userdata.Namespace[string(hashFName)]; ok {
+		fileframe := userdata.Namespace[string(hashFName)]
 		if fileframe.IsOwner == true {
-			panic("delete me")
+			panic("delete me and continue to write code")
 			//fileUUID := fileframe.
 		} else {
-			panic("delete me")
+			panic("delete me and continue to write code")
 			//not owner
 		}
 	} else {
 		//file not in namespace
-		fileUUID := userlib.RandomBytes(16)
-		fileSymmKey := userlib.HashKDF(userdata.Masterkey, userlib.RandomBytes(16))
-		newFileframe := FileFrame{true, fileUUID, fileSymmKey, make(map[string]string), 0, nil}
-		userdata.Namespace[hashFname] := newFileFrame
-		newAppend := AppendNode{data, nil, 1}
-		appendUUID := userlib.RandomBytes(16)
-		appendKey := userlib.HKDF(fileSymmKey, 1)
+		fileUUID, _ := uuid.FromBytes(userlib.RandomBytes(16))
+		fileSymmKey, _ := userlib.HashKDF(userdata.Masterkey, userlib.RandomBytes(16)) //key to encrypt/decrypt FileStruct
+		zeroUUID, _ := uuid.FromBytes([]byte(nil))
+		newFileframe := FileFrame{true, fileUUID, fileSymmKey, make(map[string]string), zeroUUID, nil}
+		userdata.Namespace[string(hashFName)] = newFileframe
+		newAppend := AppendNode{data, zeroUUID, 1}
+		appendUUID, _ := uuid.FromBytes(userlib.RandomBytes(16))
+		appendKey, _ := userlib.HashKDF(fileSymmKey, []byte{1})
 		jsonAppend, _ := json.Marshal(newAppend)
-		encAppend := userlib.SymEnc(appendKey, jsonAppend)
-		hmacAppendKey := userlib.HKDF(appendKey, []byte("hmac"))
-		hmacAppend := userlib.HMACEval(hmacAppendKey, encAppend)
+		randIV := userlib.RandomBytes(16)
+		encAppend := userlib.SymEnc(appendKey, randIV, jsonAppend) // encrypting AppendNode w/ HKDF(SymmKey, appends)
+		hmacAppendKey, _ := userlib.HashKDF(appendKey, []byte("hmac"))
+		hmacAppend, _ := userlib.HMACEval(hmacAppendKey, encAppend)
 		appendAndHmac := append(encAppend, hmacAppend...)
 		userlib.DatastoreSet(appendUUID, appendAndHmac)
-		newFile := File{1, appendUUID, appendUUID}
+		//newFile := File{1, appendUUID, appendUUID}
 	}
 	// Load the namespace map from the datastore using UUID
 	// If the filename exists in the namespace:
@@ -250,7 +248,7 @@ func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 	// 		Update the owner of the new file to myself
 	//		Encrypt + Mac and save FileStruct at new FileStructUUID
 
-	hashedFilename := Hash(filename)
+	// hashedFilename := Hash(filename)
 
 	return
 }
@@ -259,11 +257,13 @@ func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 // https://cs161.org/assets/projects/2/docs/client_api/appendfile.html
 func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 	// from the namespace map, use the hash(filename) as the key to get the FileFrameStruct
+	/*
 	fileFrame, exists := userdata.Namespace[userlib.Hash(filename)]
 	if !exists {
 		return errors.New("Filename does not exist in the namespace.")
 	}
-	var fileDecryptionKey []byte, fileUUID uuid.UUID
+	var fileDecryptionKey []byte
+	var fileUUID uuid.UUID
 
 	// if NOT the owner:
 	// 		load the SharedFileFrame from the datastore using the SharedFrame UUID in the FileFrameStruct
@@ -281,11 +281,11 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 		fileDecryptionKey = fileFrame.SymmKey
 		fileUUID = fileFrame.FileUUID
 	}
-
 	// load the FileStruct from the DataStore using the FileUUID, check for validity, and unencrypt
 	// else if data cannot be unmarshalled -- Error: user no longer has access, remove filename from namespace
 	file, errorExists := loadFileStruct(fileUUID, fileDecryptionKey,filename)
-
+	*/
+	return
 	// Generate a new random UUID called newNode
 
 	// Load AppendNode from LastAppendUUID (from the Datastore) and unencrypt it by HKDF(Symmkey, appends) and check MAC
@@ -376,7 +376,7 @@ func (userdata *User) RevokeFile(filename string, targetUsername string) (err er
 	// remove user from FileFrameStruct.user/uuid_map
 	return
 }
-
+	/*
 // Load a SharedFileFrame data structure. 
 // Verifies no tampering, decrypts, and unmarshalls. If access has been revoked, removes the file from the users namespace.
 // Assumes that the user is not an owner and has a SharedFileFrame structure
@@ -443,4 +443,4 @@ func (userdata *User) loadFileStruct (fileUUID uuid.UUID, fileDecrptionKey []byt
 	return fileStructFinal, ""
 }
 
-
+*/

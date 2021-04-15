@@ -64,7 +64,7 @@ func TestStorage(t *testing.T) {
 		return
 	}
 }
-/*
+
 func TestInvalidFile(t *testing.T) {
 	clear()
 	u, err := InitUser("alice", "fubar")
@@ -126,4 +126,3 @@ func TestShare(t *testing.T) {
 		return
 	}
 }
-*/
