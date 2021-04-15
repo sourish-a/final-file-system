@@ -218,8 +218,6 @@ func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 // AppendFile is documented at:
 // https://cs161.org/assets/projects/2/docs/client_api/appendfile.html
 func (userdata *User) AppendFile(filename string, data []byte) (err error) {
-	return
-
 	// from the namespace map, use the hash(filename) as the key to get the FileFrameStruct
 	// if NOT the owner:
 	// 		load the SharedFileFrame from the datastore using the SharedFrame UUID in the FileFrameStruct
