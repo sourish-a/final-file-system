@@ -204,11 +204,40 @@ func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 	if _, ok := userdata.Namespace[string(hashFName)]; ok {
 		fileframe := userdata.Namespace[string(hashFName)]
 		if fileframe.IsOwner == true {
-			panic("delete me and continue to write code")
-			//fileUUID := fileframe.
+			
+
+			appendUUID, _ := uuid.FromBytes(userlib.RandomBytes(16))
+			appendKey, _ := userlib.HashKDF(fileSymmKey, []byte{1})
+			appendKey = appendKey[:16]
+			jsonAppend, _ := json.Marshal(newAppend)
+			randIV := userlib.RandomBytes(16)
+			encAppend := encryptData(appendKey, randIV, jsonAppend) // encrypting AppendNode w/ HKDF(SymmKey, appends)
+			hmacAppendKey, _ := userlib.HashKDF(appendKey, []byte("hmac"))
+			hmacAppendKey = hmacAppendKey[:16]
+			hmacAppend, _ := userlib.HMACEval(hmacAppendKey, encAppend)
+			appendAndHmac := append(encAppend, hmacAppend...)
+			userlib.DatastoreSet(appendUUID, appendAndHmac)
+			newFile := File{1, appendUUID, appendUUID}
+			jsonFile := json.Marshal(newFile)
+			encFile := encHmac(fileSymmKey, jsonFile)
+			userlib.DatastoreSet(fileUUID, encFile)
 		} else {
-			panic("delete me and continue to write code")
-			//not owner
+
+			appendUUID, _ := uuid.FromBytes(userlib.RandomBytes(16))
+			appendKey, _ := userlib.HashKDF(fileSymmKey, []byte{1})
+			appendKey = appendKey[:16]
+			jsonAppend, _ := json.Marshal(newAppend)
+			randIV := userlib.RandomBytes(16)
+			encAppend := encryptData(appendKey, randIV, jsonAppend) // encrypting AppendNode w/ HKDF(SymmKey, appends)
+			hmacAppendKey, _ := userlib.HashKDF(appendKey, []byte("hmac"))
+			hmacAppendKey = hmacAppendKey[:16]
+			hmacAppend, _ := userlib.HMACEval(hmacAppendKey, encAppend)
+			appendAndHmac := append(encAppend, hmacAppend...)
+			userlib.DatastoreSet(appendUUID, appendAndHmac)
+			newFile := File{1, appendUUID, appendUUID}
+			jsonFile := json.Marshal(newFile)
+			encFile := encHmac(fileSymmKey, jsonFile)
+			userlib.DatastoreSet(fileUUID, encFile)
 		}
 	} else {
 		//file not in namespace
@@ -231,7 +260,9 @@ func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 		appendAndHmac := append(encAppend, hmacAppend...)
 		userlib.DatastoreSet(appendUUID, appendAndHmac)
 		newFile := File{1, appendUUID, appendUUID}
-		encFile := 
+		jsonFile := json.Marshal(newFile)
+		encFile := encHmac(fileSymmKey, jsonFile)
+		userlib.DatastoreSet(fileUUID, encFile)
 	}
 	// Load the namespace map from the datastore using UUID
 	// If the filename exists in the namespace:
