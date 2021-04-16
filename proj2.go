@@ -497,6 +497,27 @@ func (userdata *User) ShareFile(filename string, recipient string) (invitationLo
 // https://cs161.org/assets/projects/2/docs/client_api/receivefile.html
 func (userdata *User) ReceiveFile(filename string, sender string,
 	accessToken uuid.UUID) error {
+	//RETRIEVE INVITE
+	allInvite, somethingWrong := userlib.DatastoreGet(uuid.FromBytes(userlib.Hash(userlib.Hash([]byte(sender + filename + userdata.Username)))[:16]))
+	inviteSig := encInvite[len(encInvite) - 64:]
+	encInvite := allInvite[:len(encInvite) - 64]
+	pubDSK := userlib.KeystoreGet("DSK" + sender)
+	
+	var sharedFF SharedFileFrame
+	sharedFFptr := &sharedFF
+	if DSVerify(pubDSK, encInvite, inviteSig) != nil {
+		return nil, errors.New("Data has been tampered with!!")
+	}
+	unEncJson, somethingWrong2 := userlib.PKEDec(userdata.Privdsk, encInvite)
+	if somethingWrong2 != nil {
+		return nil, errors.New("Something has gone wrong")
+	}
+
+	errorExists := json.Unmarshal(unEncJson, sharedFFptr)
+	if errorExists != nil {
+		return nil, errorExists
+	}
+	
 	// TODO: Need to verify integrity of SharedFileInvitation as well, can something be MACd and signed?
 	// if namespace.contains(filename), Error: You already contain a file with the same name.
 	// Check that a struct exists at parameter accessToken
@@ -678,7 +699,7 @@ func (userdata *User) loadAppendNode(nodeUUID uuid.UUID, nodeDecryptionKey []byt
 		return &AppendNode{}, errors.New("Could not load encrypted file struct from DataStore.")
 	}
 	// decrypt the information
-	hashKDFkey, error := userlib.HashKDF(nodeDecryptionKey, []byte{appends})
+	hashKDFkey, error := userlib.HashKDF(nodeDecryptionKey, []byte{byte(appends)})
 	if error != nil {
 		return &AppendNode{}, error
 	}
@@ -703,7 +724,7 @@ func (userdata *User) saveAppendNode(nodeUUID uuid.UUID, nodePtr *AppendNode, ke
 		return error
 	}
 	// Encrypt and mac the data
-	hashKDFkey, error := userlib.HashKDF(key, []byte{appends})
+	hashKDFkey, error := userlib.HashKDF(key, []byte{byte(appends)})
 	if error != nil {
 		return error
 	}
