@@ -422,6 +422,7 @@ func (userdata *User) LoadFile(filename string) (dataBytes []byte, err error) { 
 	if error != nil {
 		return nil, error
 	}
+	userlib.DebugMsg("Loaded Data: %s\n", "hi")
 	// Load and decrypt fileStruct and verify validity (invalid then error)
 	file, error := userdata.loadFileStruct(fileUUID, fileDecryptionKey, filename)
 	if error != nil {
@@ -442,7 +443,6 @@ func (userdata *User) LoadFile(filename string) (dataBytes []byte, err error) { 
 	}
 	
 	// return the dataBytes and an error if any
-	userlib.DebugMsg("Loaded Data: %s\n", string(dataBytes))
 	return dataBytes, nil
 }
 
@@ -655,12 +655,12 @@ func (userdata *User) loadSharedFileFrame(uuid uuid.UUID, accessToken []byte, fi
 		return &SharedFileFrame{}, errors.New("Could not load encrypted shared frame from DataStore.")
 	}
 	// verify the data has not been tampered with
-	error := verifyValidDataHMAC(encryptedSharedFrame, accessToken)
+
+	unencryptedSharedFrame, error := verifyDecrypt(accessToken, encryptedSharedFrame)
 	if error != nil {
 		return &SharedFileFrame{}, error
 	}
 	// decrypt the information
-	unencryptedSharedFrame := decryptData(accessToken, encryptedSharedFrame)
 	// unmarshall the data
 	var sharedFrameFinal SharedFileFrame
 	sharedFileFramePointer = &sharedFrameFinal
@@ -838,6 +838,7 @@ func decryptData(key []byte, ciphertext []byte) ([]byte) {
 	// TODO: Add a check to ensure that ciphertext % blocksize == 0 before calling SymDec
 	paddedData := userlib.SymDec(key, ciphertext)
 	lenpadding := paddedData[len(paddedData) - 1]
+	userlib.DebugMsg("Bugged: %d and %d\n", len(paddedData), int(lenpadding))
 	data := paddedData[:len(paddedData) - int(lenpadding)]
 	return data
 }
