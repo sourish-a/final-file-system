@@ -365,17 +365,6 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 // LoadFile is documented at:
 // https://cs161.org/assets/projects/2/docs/client_api/loadfile.html
 func (userdata *User) LoadFile(filename string) (dataBytes []byte, err error) {
-
-	//TODO: This is a toy implementation.
-	storageKey, _ := uuid.FromBytes([]byte(filename + userdata.Username)[:16])
-	dataJSON, ok := userlib.DatastoreGet(storageKey)
-	if !ok {
-		return nil, errors.New(strings.ToTitle("File not found!"))
-	}
-	json.Unmarshal(dataJSON, &dataBytes)
-	return dataBytes, nil
-	//End of toy implementation
-
 	// If namespace does not contain hash(filename), return error
 	// Load FileFrameStruct UUID
 	// If file owner, load fileStructUUID and key directly
