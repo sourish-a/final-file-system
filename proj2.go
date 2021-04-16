@@ -92,7 +92,7 @@ type FileFrame struct {
 	IsOwner bool
 	FileUUID uuid.UUID //set to 0 unless owner, points to File struct
 	SymmKey []byte // set to 0 unless owner
-	SharedUsers map[string]string //maps username to acccess tokens for all shared users; exclusive to owner
+	SharedUsers map[string][]byte //maps username to acccess tokens for all shared users; exclusive to owner
 	SharedFrame uuid.UUID //points to SharedFileFrame, only for shared users
 	AccessToken []byte // set to 0 if owner, otherwise the key used to decrypt SharedFileFrame 
 }
@@ -303,7 +303,7 @@ func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 		fileSymmKey, _ := userlib.HashKDF(userdata.Masterkey, userlib.RandomBytes(16)) //key to encrypt/decrypt FileStruct
 		fileSymmKey = fileSymmKey[:16]
 		zeroUUID, _ := uuid.FromBytes([]byte(nil))
-		newFileframe := FileFrame{true, fileUUID, fileSymmKey, make(map[string]string), zeroUUID, nil}
+		newFileframe := FileFrame{true, fileUUID, fileSymmKey, make(map[string][]byte), zeroUUID, nil}
 		userdata.Namespace[string(hashFName)] = newFileframe
 		newAppend := AppendNode{data, zeroUUID, 1}
 		appendUUID, _ := uuid.FromBytes(userlib.RandomBytes(16))
@@ -357,24 +357,10 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 	if !exists {
 		return errors.New("Filename does not exist in the namespace.")
 	}
-
-	var fileDecryptionKey []byte
-	var fileUUID uuid.UUID
-	// if NOT the owner:
-	// 		load the SharedFileFrame from the datastore using the SharedFrame UUID in the FileFrameStruct
-	// 		get encryp/decryption key and FileUUID from the SharedFileFrame struct
-	// if owner:
-	//		load the key and FileUUID from the FileFrameStruct directly
-	if !fileFrame.IsOwner {
-		sharedFileFrame, errorExists := userdata.loadSharedFileFrame(fileFrame, filename)
-		if errorExists != nil {
-			return errorExists
-		}
-		fileDecryptionKey = sharedFileFrame.SymmKey
-		fileUUID = sharedFileFrame.SharedFileUUID
-	} else if fileFrame.IsOwner {
-		fileDecryptionKey = fileFrame.SymmKey
-		fileUUID = fileFrame.FileUUID
+	// load the file information from the fileFrame
+	fileDecryptionKey, fileUUID, error := userdata.getFileInformationFromFileFrame(&fileFrame, filename)
+	if error != nil {
+		return error
 	}
 
 	// load the FileStruct from the DataStore using the FileUUID, check for validity, and unencrypt
@@ -423,49 +409,87 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 // LoadFile is documented at:
 // https://cs161.org/assets/projects/2/docs/client_api/loadfile.html
 func (userdata *User) LoadFile(filename string) (dataBytes []byte, err error) {
-
-	//TODO: This is a toy implementation.
-	storageKey, _ := uuid.FromBytes([]byte(filename + userdata.Username)[:16])
-	dataJSON, ok := userlib.DatastoreGet(storageKey)
-	if !ok {
-		return nil, errors.New(strings.ToTitle("File not found!"))
-	}
-	json.Unmarshal(dataJSON, &dataBytes)
-	return dataBytes, nil
-	//End of toy implementation
-
 	// If namespace does not contain hash(filename), return error
-	// Load FileFrameStruct UUID
-	// If file owner, load fileStructUUID and key directly
-	// Otherwise load and decrypt SharedFileFrame, and from there load fileStructUUID and decryption key
+	fileFrame, exists := userdata.Namespace[string(userlib.Hash([]byte(filename)))]
+	if !exists {
+		return nil, errors.New("No such file.")
+	}
+	// Load FileStruct UUID and decryption key
+	fileDecryptionKey, fileUUID, error := userdata.getFileInformationFromFileFrame(&fileFrame, filename)
+	if error != nil {
+		return nil, error
+	}
 	// Load and decrypt fileStruct and verify validity (invalid then error)
+	file, error := userdata.loadFileStruct(fileUUID, fileDecryptionKey, filename)
+	if error != nil {
+		return nil, error
+	}
 	// Until null, iterate through appendNodes:
 	//		For each appendNode, load in the appendNode and decrypt and verify validity (invalid then error)
 	// 		load in the data and append to dataBytes
+	var currAppendNode *AppendNode
+	var currAppendNodeUUID uuid.UUID = file.FirstAppend
+	for i := 0; i < file.Appends; i++ {
+		currAppendNode, error = userdata.loadAppendNode(currAppendNodeUUID, fileDecryptionKey, i)
+		if error != nil {
+			return nil, error
+		}
+		dataBytes = append(dataBytes[:], currAppendNode.FileData[:] ...)
+	}
+	
 	// return the dataBytes and an error if any
-	return
+	return dataBytes, nil
 }
 
 // ShareFile is documented at:
 // https://cs161.org/assets/projects/2/docs/client_api/sharefile.html
-func (userdata *User) ShareFile(filename string, recipient string) (
-	accessToken uuid.UUID, err error) {
+func (userdata *User) ShareFile(filename string, recipient string) (invitationLocation uuid.UUID, err error) {
 	// Check that the file is in the namespace or error
-	// Grab the FileFrameStruct
+	zeroUUID, _ := uuid.FromBytes([]byte(nil))
+	fileFrame, exists := userdata.Namespace[string(userlib.Hash([]byte(filename)))]
+	if !exists {
+		return zeroUUID, errors.New("No such file.")
+	}
 	// If user is the owner of the file, 
-	//		create a new SharedFileFrame
-	// 		Save the encryption key
-	// 		Save the FileUUID
-	// 		Generate a new AccessCode and encrypt + MAC the SharedFileFrame
+	//		create a new SharedFileFrame and save relevant information
+	// 		Generate a new AccessCode and encrypt + MAC sharedFileFrame and save it
 	//		Save the SharedFileFrame in the datastore at a newUUID
 	//		Update the user/accesstoken map to include the recipient and their accesstoken
+	var accessToken []byte 
+	var sharedFrameUUID uuid.UUID
+	if fileFrame.IsOwner {
+		sharedFrame := SharedFileFrame{fileFrame.SymmKey, fileFrame.FileUUID, false}
+		unencryptedData, _ := json.Marshal(sharedFrame)
+		accessToken = userlib.RandomBytes(16)
+		encryptedData := encHmac(accessToken, unencryptedData)
+		sharedFrameUUID, _ = uuid.FromBytes(userlib.RandomBytes(16))
+		userlib.DatastoreSet(sharedFrameUUID, encryptedData)
+		fileFrame.SharedUsers[recipient] = append(accessToken[:], sharedFrameUUID[:] ...)
+	} else if !fileFrame.IsOwner {
+		accessToken = fileFrame.AccessToken
+		sharedFrameUUID = fileFrame.SharedFrame
+	}
+
 	// Create a new SharedFileInvitationStruct
-	// Save the UUID of the SharedFileFrame
-	// Save the accesstoken of the recipient
+	shareInvitation := Invite{sharedFrameUUID, accessToken}
+	unencryptedData, _ := json.Marshal(shareInvitation)
 	// Encrypt with recipient's public RSA key from the keystore
+	recipientPubRSAKey, _ := userlib.KeystoreGet("RSA" + recipient)
+	encryptedData, error := userlib.PKEEnc(recipientPubRSAKey, unencryptedData)
+	if error != nil {
+		return zeroUUID, error
+	}
+	signature, error := userlib.DSSign(userdata.Privdsk, encryptedData)
+	if error != nil {
+		return zeroUUID, error
+	}
+	signedAndEncryptedData := append(encryptedData[:], signature[:] ...)
 	// Store the SharedFileInvitationStruct at a UUID generated from the hash(filename + recipient)
+	hashedValueForUUID := userlib.Hash(userlib.Hash([]byte(userdata.Username + filename + recipient)))
+	invitationLocation, _ = uuid.FromBytes(hashedValueForUUID[:16])
+	userlib.DatastoreSet(invitationLocation, signedAndEncryptedData)
 	// return where this is stored
-	return
+	return invitationLocation, nil
 }
 
 // ReceiveFile is documented at:
@@ -613,21 +637,19 @@ func (userdata *User) loadAppendNode(nodeUUID uuid.UUID, nodeDecryptionKey []byt
 	if !ok {
 		return &AppendNode{}, errors.New("Could not load encrypted file struct from DataStore.")
 	}
-	// verify the data has not been tampered with
-	error := verifyValidDataHMAC(encryptedNodeStruct, nodeDecryptionKey)
-	if error != nil {
-		return &AppendNode{}, error
-	}
 	// decrypt the information
 	hashKDFkey, error := userlib.HashKDF(nodeDecryptionKey, []byte{byte(appends)})
 	if error != nil {
 		return &AppendNode{}, error
 	}
-	unencryptedNodeStruct := decryptData(hashKDFkey, encryptedNodeStruct)
+	unencryptedNodeStruct, errorExists := verifyDecrypt(nodeDecryptionKey, encryptedNodeStruct)
+	if errorExists != nil {
+		return &AppendNode{}, errorExists
+	}
 	// unmarshall the data
 	var node AppendNode
 	appendNodePtr = &node
-	errorExists := json.Unmarshal(unencryptedNodeStruct, appendNodePtr)
+	errorExists = json.Unmarshal(unencryptedNodeStruct, appendNodePtr)
 	if errorExists != nil {
 		return &AppendNode{}, errors.New("Incorrect data structure")
 	}
@@ -650,6 +672,28 @@ func (userdata *User) saveAppendNode(nodeUUID uuid.UUID, nodePtr *AppendNode, ke
 	// Save to the datastore
 	userlib.DatastoreSet(nodeUUID, encryptedData)
 	return nil
+}
+
+// Gets location and decryption information for a file with a filename from the specified fileFrame
+func (userdata *User) getFileInformationFromFileFrame(fileFramePtr *FileFrame, filename string) (key []byte, location uuid.UUID, err error) {
+	// if NOT the owner:
+	// 		load the SharedFileFrame from the datastore using the SharedFrame UUID in the FileFrameStruct
+	// 		get encryp/decryption key and FileUUID from the SharedFileFrame struct
+	// if owner:
+	//		load the key and FileUUID from the FileFrameStruct directly
+	zeroUUID, _ := uuid.FromBytes([]byte(nil))
+	if !fileFramePtr.IsOwner {
+		sharedFileFrame, errorExists := userdata.loadSharedFileFrame(*fileFramePtr, filename)
+		if errorExists != nil {
+			return nil, zeroUUID, errorExists
+		}
+		key = sharedFileFrame.SymmKey
+		location = sharedFileFrame.SharedFileUUID
+	} else if fileFramePtr.IsOwner {
+		key = fileFramePtr.SymmKey
+		location = fileFramePtr.FileUUID
+	}
+	return key, location, nil
 }
 
 // Verify the validity of encrypted data using HMAC
