@@ -7,13 +7,13 @@ import (
 	_ "encoding/hex"
 	_ "encoding/json"
 	_ "errors"
-	"reflect"
+	//"reflect"
 	_ "strconv"
 	_ "strings"
 	"testing"
 
 	"github.com/cs161-staff/userlib"
-	"github.com/google/uuid"
+	//"github.com/google/uuid"
 	_ "github.com/google/uuid"
 )
 
@@ -22,7 +22,7 @@ func clear() {
 	userlib.DatastoreClear()
 	userlib.KeystoreClear()
 }
-
+/*
 func TestInit(t *testing.T) {
 	clear()
 	t.Log("Initialization test")
@@ -42,7 +42,34 @@ func TestInit(t *testing.T) {
 	// write _ = u here to make the compiler happy
 	// You probably want many more tests here.
 }
+*/
+func TestCrypt(t *testing.T) {
+	clear()
+	t.Log("Encryption/Decryption test")
 
+	// You can set this to false!
+	userlib.SetDebugStatus(true)
+
+	u, err := InitUser("alice", "fubar")
+	u2, err2 := GetUser("alice", "fubar")
+	if err != nil {
+		// t.Error says the test fails
+		t.Error("Failed to initialize user", err)
+		return
+	}
+	if err2 != nil {
+		// t.Error says the test fails
+		t.Error("Failed to initialize user", err2)
+		return
+	}
+	// t.Log() only produces output if you run with "go test -v"
+	t.Log("Got user", u)
+	t.Log("Retrieved user", u2)
+	// If you want to comment the line above,
+	// write _ = u here to make the compiler happy
+	// You probably want many more tests here.
+}
+/*
 func TestStorage(t *testing.T) {
 	clear()
 	u, err := InitUser("alice", "fubar")
@@ -126,3 +153,4 @@ func TestShare(t *testing.T) {
 		return
 	}
 }
+*/
