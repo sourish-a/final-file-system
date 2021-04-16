@@ -433,11 +433,12 @@ func (userdata *User) LoadFile(filename string) (dataBytes []byte, err error) {
 	var currAppendNode *AppendNode
 	var currAppendNodeUUID uuid.UUID = file.FirstAppend
 	for i := 0; i < file.Appends; i++ {
-		currAppendNode, error = userdata.loadAppendNode(currAppendNodeUUID, fileDecryptionKey, i)
+		currAppendNode, error = userdata.loadAppendNode(currAppendNodeUUID, fileDecryptionKey, i + 1)
 		if error != nil {
 			return nil, error
 		}
 		dataBytes = append(dataBytes[:], currAppendNode.FileData[:] ...)
+		currAppendNodeUUID = currAppendNode.NextPtr
 	}
 	
 	// return the dataBytes and an error if any
@@ -572,34 +573,94 @@ func (userdata *User) ReceiveFile(filename string, sender string,
 // https://cs161.org/assets/projects/2/docs/client_api/revokefile.html
 func (userdata *User) RevokeFile(filename string, targetUsername string) (err error) {
 	// if !namespace.containsKey(filename), Error: No such file
+	fileFrame, exists := userdata.Namespace[string(userlib.Hash([]byte(filename)))]
+	if !exists {
+		return errors.New("No such file.")
+	}
 	// if !user/accesstoken_map(targetUsername), Error: File not shared with specified user
-	// Retrieve FileFrameStruct from namespace
+	tokenAndUUID, exists := fileFrame.SharedUsers[targetUsername]
+	if !exists {
+		return errors.New("File not shared with specified user.")
+	}
 	// Retrieve UUID of IntermediateStruct + Accesskey to decrypt from user/uuid table
+	accessToken := tokenAndUUID[:16]
+	intermediateStructUUID, _ := uuid.FromBytes(tokenAndUUID[16:])
+
+	// load SharedFileFrame
+	sharedFileFrame, error := userdata.loadSharedFileFrame(intermediateStructUUID, accessToken, filename)
+	if error != nil {
+		return error
+	}
 	// Set revoked boolean to true, set file UUID to 0, set encryption decryption key to 0
+	sharedFileFrame.Revoked = true
+	sharedFileFrame.SharedFileUUID, _ = uuid.FromBytes([]byte(nil))
+	sharedFileFrame.SymmKey = []byte{}
+
+	// update symmkeys
+	newSymmKey, error := userlib.HashKDF(userdata.Masterkey, userlib.RandomBytes(16))
+	if error != nil {
+		return error
+	}
+
 	// Iterate through keyset of shared users (except targetUsername) and change encryption/decryption keys
+	delete(fileFrame.SharedUsers, targetUsername)
+	for k := range fileFrame.SharedUsers {
+		tokenAndUUID, _ := fileFrame.SharedUsers[k]
+		accessToken = tokenAndUUID[:16]
+		intermediateStructUUID, _ = uuid.FromBytes(tokenAndUUID[16:])
+		sharedFileFrame, error := userdata.loadSharedFileFrame(intermediateStructUUID, accessToken, filename)
+		if error != nil {
+			return error
+		}
+		sharedFileFrame.SymmKey = newSymmKey
+		error = userdata.saveSharedFileFrame(intermediateStructUUID, sharedFileFrame, accessToken)
+	}
+
+	// Reencrypt all the filedata with the new key
 	// Load FileStruct, decrypt w/ old key, Load FirstAppend, decrypt w/ old key
+	file, error := userdata.loadFileStruct(fileFrame.FileUUID, fileFrame.SymmKey, filename)
+	if error != nil {
+		return error
+	}
 	// till null, reencrypt w new key and put back
+	var currAppendNode *AppendNode
+	var currAppendNodeUUID uuid.UUID = file.FirstAppend
+	for i:=0; i < file.Appends; i++ {
+		currAppendNode, error = userdata.loadAppendNode(currAppendNodeUUID, fileFrame.SymmKey, i + 1)
+		if error != nil {
+			return error
+		}
+		error = userdata.saveAppendNode(currAppendNodeUUID, currAppendNode, newSymmKey, i + 1)
+		if error != nil {
+			return error
+		}
+		currAppendNodeUUID = currAppendNode.NextPtr
+	}
 	// reencrypt fileStruct
-	// remove user from FileFrameStruct.user/uuid_map
-	return
+	error = userdata.saveFileStruct(fileFrame.FileUUID, file, newSymmKey)
+	if error != nil {
+		return error
+	}
+	fileFrame.SymmKey = newSymmKey
+	return nil
 }
 
 // Load a SharedFileFrame data structure. 
 // Verifies no tampering, decrypts, and unmarshalls. If access has been revoked, removes the file from the users namespace.
 // Assumes that the user is not an owner and has a SharedFileFrame structure
-func (userdata *User) loadSharedFileFrame(fileFrame FileFrame, filename string)(sharedFileFramePointer *SharedFileFrame, err error) {
+func (userdata *User) loadSharedFileFrame(uuid uuid.UUID, accessToken []byte, filename string)(sharedFileFramePointer *SharedFileFrame, err error) {
 	// load the encrypted json data for the Shared File Frame
-	encryptedSharedFrame, ok := userlib.DatastoreGet(fileFrame.SharedFrame)
+	encryptedSharedFrame, ok := userlib.DatastoreGet(uuid)
 	if !ok {
 		return &SharedFileFrame{}, errors.New("Could not load encrypted shared frame from DataStore.")
 	}
 	// verify the data has not been tampered with
-	error := verifyValidDataHMAC(encryptedSharedFrame, fileFrame.AccessToken)
+	error := verifyValidDataHMAC(encryptedSharedFrame, accessToken)
 	if error != nil {
 		return &SharedFileFrame{}, error
 	}
 	// decrypt the information
-	unencryptedSharedFrame := decryptData(fileFrame.AccessToken, encryptedSharedFrame)
+	unencryptedSharedFrame := decryptData(accessToken, encryptedSharedFrame)
 	// unmarshall the data
 	var sharedFrameFinal SharedFileFrame
 	sharedFileFramePointer = &sharedFrameFinal
@@ -723,7 +784,7 @@ func (userdata *User) getFileInformationFromFileFrame(fileFramePtr *FileFrame, f
 	//		load the key and FileUUID from the FileFrameStruct directly
 	zeroUUID, _ := uuid.FromBytes([]byte(nil))
 	if !fileFramePtr.IsOwner {
-		sharedFileFrame, errorExists := userdata.loadSharedFileFrame(*fileFramePtr, filename)
+		sharedFileFrame, errorExists := userdata.loadSharedFileFrame(fileFramePtr.SharedFrame, fileFramePtr.AccessToken, filename)
 		if errorExists != nil {
 			return nil, zeroUUID, errorExists
 		}
