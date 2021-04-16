@@ -105,7 +105,7 @@ type File struct {
 
 type AppendNode struct {
 	FileData []byte
-	NextPrt uuid.UUID
+	NextPtr uuid.UUID
 	NumAppend int
 }
 
@@ -267,9 +267,9 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 	if !exists {
 		return errors.New("Filename does not exist in the namespace.")
 	}
+
 	var fileDecryptionKey []byte
 	var fileUUID uuid.UUID
-
 	// if NOT the owner:
 	// 		load the SharedFileFrame from the datastore using the SharedFrame UUID in the FileFrameStruct
 	// 		get encryp/decryption key and FileUUID from the SharedFileFrame struct
@@ -286,24 +286,48 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 		fileDecryptionKey = fileFrame.SymmKey
 		fileUUID = fileFrame.FileUUID
 	}
+
 	// load the FileStruct from the DataStore using the FileUUID, check for validity, and unencrypt
 	// else if data cannot be unmarshalled -- Error: user no longer has access, remove filename from namespace
-	file, errorExists := userdata.loadFileStruct(fileUUID, fileDecryptionKey,filename)
+	file, errorExists := userdata.loadFileStruct(fileUUID, fileDecryptionKey, filename)
 	if errorExists != nil {
 		return errorExists
 	}
-	panic(file.Appends)
-	return
+
 	// Generate a new random UUID called newNode
+	newNodeUUID, _ := uuid.FromBytes(userlib.RandomBytes(16))
 
 	// Load AppendNode from LastAppendUUID (from the Datastore) and unencrypt it by HKDF(Symmkey, appends) and check MAC
 	// Set nextAppendNode to this new UUID
 	// Reencrypt and MAC using HKDF(symmkey, appends), put back in datastore at LastAppendUUID
+	previouslyLastAppendNode, error := userdata.loadAppendNode(file.LastAppend, fileFrame.SymmKey, file.Appends)
+	if error != nil {
+		return error
+	}
+	previouslyLastAppendNode.NextPtr = newNodeUUID
+	error = userdata.saveAppendNode(file.LastAppend, previouslyLastAppendNode, fileFrame.SymmKey, file.Appends)
+	if error != nil {
+		return error
+	}
+
 	// Change LastAppendUUID to newNode
 	// increment appends by 1 in the FileStruct
+	file.LastAppend = newNodeUUID
+	file.Appends = file.Appends + 1
+
 	// Create new AppendNodeStruct, and Save the new filedata to the AppendNode, and set the next node to null
+	zeroUUID, _ := uuid.FromBytes([]byte(nil))
+	newAppendNode := AppendNode{data, zeroUUID, file.Appends}
 	// Encrypt + MAC the append node using HKDF(Symmkey, appends), save in Datastore with the newly generated UUID
-	
+	error = userdata.saveAppendNode(file.LastAppend, &newAppendNode, fileFrame.SymmKey, file.Appends)
+	if error != nil {
+		return error
+	}
+	error = userdata.saveFileStruct(fileUUID, file, fileFrame.SymmKey)
+	if error != nil {
+		return error
+	}
+	return nil
 }
 
 // LoadFile is documented at:
@@ -472,7 +496,7 @@ func (userdata *User) saveFileStruct(fileUUID uuid.UUID, filePtr *File, key []by
 	return nil
 }
 
-func (userdata *User) loadAppendNode(nodeUUID uuid.UUID, nodeDecryptionKey []byte) (appendNodePtr *AppendNode, err error) {
+func (userdata *User) loadAppendNode(nodeUUID uuid.UUID, nodeDecryptionKey []byte, appends int) (appendNodePtr *AppendNode, err error) {
 	// load the encrypted json data for the file struct
 	encryptedNodeStruct, ok := userlib.DatastoreGet(nodeUUID)
 	if !ok {
@@ -484,7 +508,11 @@ func (userdata *User) loadAppendNode(nodeUUID uuid.UUID, nodeDecryptionKey []byt
 		return &AppendNode{}, error
 	}
 	// decrypt the information
-	unencryptedNodeStruct := decryptData(nodeDecryptionKey, encryptedNodeStruct)
+	hashKDFkey, error := userlib.HashKDF(nodeDecryptionKey, []byte{appends})
+	if error != nil {
+		return &AppendNode{}, error
+	}
+	unencryptedNodeStruct := decryptData(hashKDFkey, encryptedNodeStruct)
 	// unmarshall the data
 	var node AppendNode
 	appendNodePtr = &node
@@ -495,14 +523,19 @@ func (userdata *User) loadAppendNode(nodeUUID uuid.UUID, nodeDecryptionKey []byt
 	return appendNodePtr, nil
 }
 
-func (userdata *User) saveAppendNode(nodeUUID uuid.UUID, nodePtr *AppendNode, key []byte)(err error) {
+func (userdata *User) saveAppendNode(nodeUUID uuid.UUID, nodePtr *AppendNode, key []byte, appends int)(err error) {
 	// Marshal AppendNode to byte array
 	unencryptedData, error := json.Marshal(*nodePtr)
 	if error != nil {
 		return error
 	}
 	// Encrypt and mac the data
-	encryptedData := encHmac(key, unencryptedData)
+	hashKDFkey, error := userlib.HashKDF(key, []byte{appends})
+	if error != nil {
+		return error
+	}
+
+	encryptedData := encHmac(hashKDFkey, unencryptedData)
 	// Save to the datastore
 	userlib.DatastoreSet(nodeUUID, encryptedData)
 	return nil
