@@ -24,7 +24,6 @@ import (
 
 	// Want to import errors.
 	"errors"
-
 	// Optional. You can remove the "_" there, but please do not touch
 	// anything else within the import bracket.
 	_ "strconv"
@@ -142,10 +141,11 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	pubRSA, userdata.PrivRSA, _ = userlib.PKEKeyGen()
 	userdata.Privdsk, pubDSK, _ = userlib.DSKeyGen()
 	hmacKey, _ := userlib.HashKDF(userdata.Masterkey, []byte("hmac"))
+	hmacKey = hmacKey[:16]
 	userdata.Namespace = make(map[string]FileFrame)
 	toJson, _ := json.Marshal(userdata)
 	iv := userlib.RandomBytes(16)
-	jsonEnc := userlib.SymEnc(userdata.Masterkey, iv, toJson)
+	jsonEnc := encryptData(userdata.Masterkey, iv, toJson)
 	userlib.KeystoreSet("RSA" + username , pubRSA)
 	userlib.KeystoreSet("DSK" + username , pubDSK)
 	signature, _ := userlib.DSSign(userdata.Privdsk, jsonEnc)
@@ -179,12 +179,13 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 	}
 	master := userlib.Argon2Key([]byte(password), userlib.Hash([]byte(username)), 16)
 	hmacKey, _ := userlib.HashKDF(master, []byte("hmac"))
+	hmacKey = hmacKey[:16]
 	hmacCheck, _ := userlib.HMACEval(hmacKey, encJson)
 	if !userlib.HMACEqual(hmacCheck, hmac) {
 		panic("Data has been tampered with!!")
 		return nil, errors.New("Data has been tampered with!!")
 	}
-	unEncJson := userlib.SymDec(master, encJson)
+	unEncJson := decryptData(master, encJson)
 	errorExists := json.Unmarshal(unEncJson, userdataptr)
 	if errorExists != nil {
 		panic("incorrect password")
@@ -211,16 +212,19 @@ func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 		//file not in namespace
 		fileUUID, _ := uuid.FromBytes(userlib.RandomBytes(16))
 		fileSymmKey, _ := userlib.HashKDF(userdata.Masterkey, userlib.RandomBytes(16)) //key to encrypt/decrypt FileStruct
+		fileSymmKey = fileSymmKey[:16]
 		zeroUUID, _ := uuid.FromBytes([]byte(nil))
 		newFileframe := FileFrame{true, fileUUID, fileSymmKey, make(map[string]string), zeroUUID, nil}
 		userdata.Namespace[string(hashFName)] = newFileframe
 		newAppend := AppendNode{data, zeroUUID, 1}
 		appendUUID, _ := uuid.FromBytes(userlib.RandomBytes(16))
 		appendKey, _ := userlib.HashKDF(fileSymmKey, []byte{1})
+		appendKey = appendKey[:16]
 		jsonAppend, _ := json.Marshal(newAppend)
 		randIV := userlib.RandomBytes(16)
-		encAppend := userlib.SymEnc(appendKey, randIV, jsonAppend) // encrypting AppendNode w/ HKDF(SymmKey, appends)
+		encAppend := encryptData(appendKey, randIV, jsonAppend) // encrypting AppendNode w/ HKDF(SymmKey, appends)
 		hmacAppendKey, _ := userlib.HashKDF(appendKey, []byte("hmac"))
+		hmacAppendKey = hmacAppendKey[:16]
 		hmacAppend, _ := userlib.HMACEval(hmacAppendKey, encAppend)
 		appendAndHmac := append(encAppend, hmacAppend...)
 		userlib.DatastoreSet(appendUUID, appendAndHmac)
@@ -460,5 +464,24 @@ func (userdata *User) loadFileStruct (fileUUID uuid.UUID, fileDecryptionKey []by
 }
 
 func (userdata *User) loadAppendNode () (appendNodePtr *AppendNode, err error) {
-	
+}
+
+//SymDec(), but accounts for padding
+func decryptData(key []byte, ciphertext []byte) ([]byte) {
+	paddedData := userlib.SymDec(key, ciphertext)
+	lenpadding := paddedData[len(paddedData) - 1]
+	data := paddedData[:len(paddedData) - int(lenpadding)]
+	return data
+}
+//SymEnC(), but add padding
+func encryptData(key []byte, iv []byte, ciphertext []byte) ([]byte) {
+	lenpadding := 16 - len(ciphertext) % 16
+	padding := make([]byte, lenpadding)
+	for i, _ := range padding {
+		padding[i] = byte(lenpadding)
+	}
+
+	paddedData := append(ciphertext, padding...)
+	encData := userlib.SymEnc(key, iv, paddedData)
+	return encData
 }
