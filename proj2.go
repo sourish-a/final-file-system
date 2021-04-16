@@ -92,7 +92,7 @@ type FileFrame struct {
 	IsOwner bool
 	FileUUID uuid.UUID //set to 0 unless owner, points to File struct
 	SymmKey []byte // set to 0 unless owner
-	SharedUsers map[string]string //maps username to acccess tokens for all shared users; exclusive to owner
+	SharedUsers map[string][]byte //maps username to acccess tokens for all shared users; exclusive to owner
 	SharedFrame uuid.UUID //points to SharedFileFrame, only for shared users
 	AccessToken []byte // set to 0 if owner, otherwise the key used to decrypt SharedFileFrame 
 }
@@ -303,7 +303,7 @@ func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 		fileSymmKey, _ := userlib.HashKDF(userdata.Masterkey, userlib.RandomBytes(16)) //key to encrypt/decrypt FileStruct
 		fileSymmKey = fileSymmKey[:16]
 		zeroUUID, _ := uuid.FromBytes([]byte(nil))
-		newFileframe := FileFrame{true, fileUUID, fileSymmKey, make(map[string]string), zeroUUID, nil}
+		newFileframe := FileFrame{true, fileUUID, fileSymmKey, make(map[string][]byte), zeroUUID, nil}
 		userdata.Namespace[string(hashFName)] = newFileframe
 		newAppend := AppendNode{data, zeroUUID, 1}
 		appendUUID, _ := uuid.FromBytes(userlib.RandomBytes(16))
@@ -443,24 +443,53 @@ func (userdata *User) LoadFile(filename string) (dataBytes []byte, err error) {
 
 // ShareFile is documented at:
 // https://cs161.org/assets/projects/2/docs/client_api/sharefile.html
-func (userdata *User) ShareFile(filename string, recipient string) (
-	accessToken uuid.UUID, err error) {
+func (userdata *User) ShareFile(filename string, recipient string) (invitationLocation uuid.UUID, err error) {
 	// Check that the file is in the namespace or error
-	// Grab the FileFrameStruct
+	zeroUUID, _ := uuid.FromBytes([]byte(nil))
+	fileFrame, exists := userdata.Namespace[string(userlib.Hash([]byte(filename)))]
+	if !exists {
+		return zeroUUID, errors.New("No such file.")
+	}
 	// If user is the owner of the file, 
-	//		create a new SharedFileFrame
-	// 		Save the encryption key
-	// 		Save the FileUUID
-	// 		Generate a new AccessCode and encrypt + MAC the SharedFileFrame
+	//		create a new SharedFileFrame and save relevant information
+	// 		Generate a new AccessCode and encrypt + MAC sharedFileFrame and save it
 	//		Save the SharedFileFrame in the datastore at a newUUID
 	//		Update the user/accesstoken map to include the recipient and their accesstoken
+	var accessToken []byte 
+	var sharedFrameUUID uuid.UUID
+	if fileFrame.IsOwner {
+		sharedFrame := SharedFileFrame{fileFrame.SymmKey, fileFrame.FileUUID, false}
+		unencryptedData, _ := json.Marshal(sharedFrame)
+		accessToken = userlib.RandomBytes(16)
+		encryptedData := encHmac(accessToken, unencryptedData)
+		sharedFrameUUID, _ = uuid.FromBytes(userlib.RandomBytes(16))
+		userlib.DatastoreSet(sharedFrameUUID, encryptedData)
+		fileFrame.SharedUsers[recipient] = append(accessToken[:], sharedFrameUUID[:] ...)
+	} else if !fileFrame.IsOwner {
+		accessToken = fileFrame.AccessToken
+		sharedFrameUUID = fileFrame.SharedFrame
+	}
+
 	// Create a new SharedFileInvitationStruct
-	// Save the UUID of the SharedFileFrame
-	// Save the accesstoken of the recipient
+	shareInvitation := Invite{sharedFrameUUID, accessToken}
+	unencryptedData, _ := json.Marshal(shareInvitation)
 	// Encrypt with recipient's public RSA key from the keystore
+	recipientPubRSAKey, _ := userlib.KeystoreGet("RSA" + recipient)
+	encryptedData, error := userlib.PKEEnc(recipientPubRSAKey, unencryptedData)
+	if error != nil {
+		return zeroUUID, error
+	}
+	signature, error := userlib.DSSign(userdata.Privdsk, encryptedData)
+	if error != nil {
+		return zeroUUID, error
+	}
+	signedAndEncryptedData := append(encryptedData[:], signature[:] ...)
 	// Store the SharedFileInvitationStruct at a UUID generated from the hash(filename + recipient)
+	hashedValueForUUID := userlib.Hash(userlib.Hash([]byte(userdata.Username + filename + recipient)))
+	invitationLocation, _ = uuid.FromBytes(hashedValueForUUID[:16])
+	userlib.DatastoreSet(invitationLocation, signedAndEncryptedData)
 	// return where this is stored
-	return
+	return invitationLocation, nil
 }
 
 // ReceiveFile is documented at:
