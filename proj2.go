@@ -358,7 +358,7 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 		return errors.New("Filename does not exist in the namespace.")
 	}
 	// load the file information from the fileFrame
-	fileDecryptionKey, fileUUID, error := getFileInformationFromFileFrame(&fileFrame, filename)
+	fileDecryptionKey, fileUUID, error := userdata.getFileInformationFromFileFrame(&fileFrame, filename)
 	if error != nil {
 		return error
 	}
@@ -415,26 +415,26 @@ func (userdata *User) LoadFile(filename string) (dataBytes []byte, err error) {
 		return nil, errors.New("No such file.")
 	}
 	// Load FileStruct UUID and decryption key
-	fileDecryptionKey, fileUUID, error := getFileInformationFromFileFrame(&fileFrame, filename)
+	fileDecryptionKey, fileUUID, error := userdata.getFileInformationFromFileFrame(&fileFrame, filename)
 	if error != nil {
 		return nil, error
 	}
 	// Load and decrypt fileStruct and verify validity (invalid then error)
-	file, error := loadFileStruct(fileUUID, fileDecryptionKey, filename)
+	file, error := userdata.loadFileStruct(fileUUID, fileDecryptionKey, filename)
 	if error != nil {
 		return nil, error
 	}
 	// Until null, iterate through appendNodes:
 	//		For each appendNode, load in the appendNode and decrypt and verify validity (invalid then error)
 	// 		load in the data and append to dataBytes
-	var currAppendNode AppendNode
+	var currAppendNode *AppendNode
 	var currAppendNodeUUID uuid.UUID = file.FirstAppend
 	for i := 0; i < file.Appends; i++ {
-		currAppendNode, error = loadAppendNode(currAppendNodeUUID, fileDecryptionKey, i)
-		if error != null {
+		currAppendNode, error = userdata.loadAppendNode(currAppendNodeUUID, fileDecryptionKey, i)
+		if error != nil {
 			return nil, error
 		}
-		dataBytes = append(dataBytes[:], currAppendNode.FileData[:])
+		dataBytes = append(dataBytes[:], currAppendNode.FileData[:] ...)
 	}
 	
 	// return the dataBytes and an error if any
@@ -592,14 +592,14 @@ func (userdata *User) loadAppendNode(nodeUUID uuid.UUID, nodeDecryptionKey []byt
 	if error != nil {
 		return &AppendNode{}, error
 	}
-	uencryptedNodeStruct, errorExists := verifyDecrypt(nodeDecryptionKey, encryptedNodeStruct)
+	unencryptedNodeStruct, errorExists := verifyDecrypt(nodeDecryptionKey, encryptedNodeStruct)
 	if errorExists != nil {
 		return &AppendNode{}, errorExists
 	}
 	// unmarshall the data
 	var node AppendNode
 	appendNodePtr = &node
-	errorExists := json.Unmarshal(unencryptedNodeStruct, appendNodePtr)
+	errorExists = json.Unmarshal(unencryptedNodeStruct, appendNodePtr)
 	if errorExists != nil {
 		return &AppendNode{}, errors.New("Incorrect data structure")
 	}
@@ -631,17 +631,17 @@ func (userdata *User) getFileInformationFromFileFrame(fileFramePtr *FileFrame, f
 	// 		get encryp/decryption key and FileUUID from the SharedFileFrame struct
 	// if owner:
 	//		load the key and FileUUID from the FileFrameStruct directly
-	zeroUUID = uuid.FromBytes([]byte(nil))
-	if !fileFrame.IsOwner {
-		sharedFileFrame, errorExists := userdata.loadSharedFileFrame(*fileFrame, filename)
+	zeroUUID, _ := uuid.FromBytes([]byte(nil))
+	if !fileFramePtr.IsOwner {
+		sharedFileFrame, errorExists := userdata.loadSharedFileFrame(*fileFramePtr, filename)
 		if errorExists != nil {
 			return nil, zeroUUID, errorExists
 		}
 		key = sharedFileFrame.SymmKey
 		location = sharedFileFrame.SharedFileUUID
-	} else if fileFrame.IsOwner {
-		key = fileFrame.SymmKey
-		location = fileFrame.FileUUID
+	} else if fileFramePtr.IsOwner {
+		key = fileFramePtr.SymmKey
+		location = fileFramePtr.FileUUID
 	}
 	return key, location, nil
 }
