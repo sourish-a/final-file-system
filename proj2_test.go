@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"github.com/cs161-staff/userlib"
-	//"github.com/google/uuid"
+	"github.com/google/uuid"
 	_ "github.com/google/uuid"
 )
 
@@ -107,7 +107,7 @@ func TestInvalidFile(t *testing.T) {
 	}
 }
 
-/*
+
 func TestShare(t *testing.T) {
 	clear()
 	u, err := InitUser("alice", "fubar")
@@ -154,4 +154,3 @@ func TestShare(t *testing.T) {
 		return
 	}
 }
-*/

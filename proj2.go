@@ -411,7 +411,7 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 
 // LoadFile is documented at:
 // https://cs161.org/assets/projects/2/docs/client_api/loadfile.html
-func (userdata *User) LoadFile(filename string) (dataBytes []byte, err error) {
+func (userdata *User) LoadFile(filename string) (dataBytes []byte, err error) { //ERROR: have to account for if user is not owner
 	// If namespace does not contain hash(filename), return error
 	fileFrame, exists := userdata.Namespace[string(userlib.Hash([]byte(filename)))]
 	if !exists {
@@ -442,6 +442,7 @@ func (userdata *User) LoadFile(filename string) (dataBytes []byte, err error) {
 	}
 	
 	// return the dataBytes and an error if any
+	userlib.DebugMsg("Loaded Data: %s\n", string(dataBytes))
 	return dataBytes, nil
 }
 
@@ -489,11 +490,14 @@ func (userdata *User) ShareFile(filename string, recipient string) (invitationLo
 	}
 	signedAndEncryptedData := append(encryptedData[:], signature[:] ...)
 	// Store the SharedFileInvitationStruct at a UUID generated from the hash(filename + recipient)
-	hashedValueForUUID := userlib.Hash(userlib.Hash([]byte(userdata.Username + filename + recipient)))
+	random16Bytes := userlib.RandomBytes(16)
+	randomUUID, _ := uuid.FromBytes(random16Bytes)
+	hashedValueForUUID := userlib.Hash(userlib.Hash([]byte(userdata.Username + randomUUID.String() + recipient)))
 	invitationLocation, _ = uuid.FromBytes(hashedValueForUUID[:16])
 	userlib.DatastoreSet(invitationLocation, signedAndEncryptedData)
+
 	// return where this is stored
-	return invitationLocation, nil
+	return randomUUID, nil
 }
 
 // ReceiveFile is documented at:
@@ -506,17 +510,15 @@ func (userdata *User) ReceiveFile(filename string, sender string,
 		return errors.New("File already exists in namespace!")
 	}
 	//RETRIEVE INVITE
-
 	//Retrieve, verify and decrypt Invite
-	inviteUUID, _ := uuid.FromBytes(userlib.Hash(userlib.Hash([]byte(sender + filename + userdata.Username)))[:16])
+	inviteUUID, _ := uuid.FromBytes(userlib.Hash(userlib.Hash([]byte(sender + accessToken.String() + userdata.Username)))[:16])
 	allInvite, somethingWrong := userlib.DatastoreGet(inviteUUID)
 	if somethingWrong == false {
-		return errors.New("Something has gone wrong")
+		return errors.New("Something has gone wrong!!")
 	}
-	inviteSig := allInvite[len(allInvite) - 64:]
-	encInvite := allInvite[:len(allInvite) - 64]
+	inviteSig := allInvite[len(allInvite) - 256:]
+	encInvite := allInvite[:len(allInvite) - 256]
 	pubDSK, _ := userlib.KeystoreGet("DSK" + sender)
-	
 	var invite Invite
 	var sharedFF SharedFileFrame
 	sharedFFptr := &sharedFF
@@ -524,9 +526,9 @@ func (userdata *User) ReceiveFile(filename string, sender string,
 	if userlib.DSVerify(pubDSK, encInvite, inviteSig) != nil {
 		return errors.New("Data has been tampered with!!")
 	}
-	unEncJson, somethingWrong2 := userlib.PKEDec(userdata.Privdsk, encInvite)
+	unEncJson, somethingWrong2 := userlib.PKEDec(userdata.PrivRSA, encInvite)
 	if somethingWrong2 != nil {
-		return errors.New("Something has gone wrong")
+		return errors.New("Something has gone wrong!")
 	}
 
 	errorExists := json.Unmarshal(unEncJson, inviteptr)
@@ -556,8 +558,6 @@ func (userdata *User) ReceiveFile(filename string, sender string,
 	zeroUUID, _ := uuid.FromBytes([]byte(nil))
 	userdata.Namespace[string(userlib.Hash([]byte(filename)))] = FileFrame{false, zeroUUID, []byte(nil), nil, invite.SharedFileUUID, invite.Accessor}
 	userdata.storeUserdata()
-
-	
 	// TODO: Need to verify integrity of SharedFileInvitation as well, can something be MACd and signed?
 	// if namespace.contains(filename), Error: You already contain a file with the same name.
 	// Check that a struct exists at parameter accessToken
@@ -745,7 +745,6 @@ func (userdata *User) loadAppendNode(nodeUUID uuid.UUID, nodeDecryptionKey []byt
 	if error != nil {
 		return &AppendNode{}, error
 	}
-	userlib.DebugMsg("fileUUID: %s\n", "hi")
 	unencryptedNodeStruct, errorExists := verifyDecrypt(hashKDFkey, encryptedNodeStruct)
 	if errorExists != nil {
 		return &AppendNode{}, errorExists
