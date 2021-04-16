@@ -7,7 +7,7 @@ import (
 	_ "encoding/hex"
 	_ "encoding/json"
 	_ "errors"
-	//"reflect"
+	"reflect"
 	_ "strconv"
 	_ "strings"
 	"testing"
@@ -69,7 +69,7 @@ func TestCrypt(t *testing.T) {
 	// write _ = u here to make the compiler happy
 	// You probably want many more tests here.
 }
-/*
+
 func TestStorage(t *testing.T) {
 	clear()
 	u, err := InitUser("alice", "fubar")
@@ -107,6 +107,7 @@ func TestInvalidFile(t *testing.T) {
 	}
 }
 
+/*
 func TestShare(t *testing.T) {
 	clear()
 	u, err := InitUser("alice", "fubar")
