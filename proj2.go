@@ -212,26 +212,25 @@ func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 		}
 	} else {
 		//file not in namespace
-		fileUUID, _ := uuid.FromBytes(userlib.RandomBytes(16))
-		fileSymmKey, _ := userlib.HashKDF(userdata.Masterkey, userlib.RandomBytes(16)) //key to encrypt/decrypt FileStruct
-		fileSymmKey = fileSymmKey[:16]
-		zeroUUID, _ := uuid.FromBytes([]byte(nil))
-		newFileframe := FileFrame{true, fileUUID, fileSymmKey, make(map[string]string), zeroUUID, nil}
-		userdata.Namespace[string(hashFName)] = newFileframe
-		newAppend := AppendNode{data, zeroUUID, 1}
-		appendUUID, _ := uuid.FromBytes(userlib.RandomBytes(16))
-		appendKey, _ := userlib.HashKDF(fileSymmKey, []byte{1})
-		appendKey = appendKey[:16]
-		jsonAppend, _ := json.Marshal(newAppend)
-		randIV := userlib.RandomBytes(16)
-		encAppend := encryptData(appendKey, randIV, jsonAppend) // encrypting AppendNode w/ HKDF(SymmKey, appends)
-		hmacAppendKey, _ := userlib.HashKDF(appendKey, []byte("hmac"))
-		hmacAppendKey = hmacAppendKey[:16]
-		hmacAppend, _ := userlib.HMACEval(hmacAppendKey, encAppend)
-		appendAndHmac := append(encAppend, hmacAppend...)
-		userlib.DatastoreSet(appendUUID, appendAndHmac)
-		newFile := File{1, appendUUID, appendUUID}
-		encFile := 
+		// fileUUID, _ := uuid.FromBytes(userlib.RandomBytes(16))
+		// fileSymmKey, _ := userlib.HashKDF(userdata.Masterkey, userlib.RandomBytes(16)) //key to encrypt/decrypt FileStruct
+		// fileSymmKey = fileSymmKey[:16]
+		// zeroUUID, _ := uuid.FromBytes([]byte(nil))
+		// newFileframe := FileFrame{true, fileUUID, fileSymmKey, make(map[string]string), zeroUUID, nil}
+		// userdata.Namespace[string(hashFName)] = newFileframe
+		// newAppend := AppendNode{data, zeroUUID, 1}
+		// appendUUID, _ := uuid.FromBytes(userlib.RandomBytes(16))
+		// appendKey, _ := userlib.HashKDF(fileSymmKey, []byte{1})
+		// appendKey = appendKey[:16]
+		// jsonAppend, _ := json.Marshal(newAppend)
+		// randIV := userlib.RandomBytes(16)
+		// encAppend := encryptData(appendKey, randIV, jsonAppend) // encrypting AppendNode w/ HKDF(SymmKey, appends)
+		// hmacAppendKey, _ := userlib.HashKDF(appendKey, []byte("hmac"))
+		// hmacAppendKey = hmacAppendKey[:16]
+		// hmacAppend, _ := userlib.HMACEval(hmacAppendKey, encAppend)
+		// appendAndHmac := append(encAppend, hmacAppend...)
+		// userlib.DatastoreSet(appendUUID, appendAndHmac)
+		// newFile := File{1, appendUUID, appendUUID}
 	}
 	// Load the namespace map from the datastore using UUID
 	// If the filename exists in the namespace:
@@ -420,6 +419,19 @@ func (userdata *User) loadSharedFileFrame(fileFrame FileFrame, filename string)(
 	return sharedFileFramePointer, nil
 }
 
+func (userdata *User) saveSharedFileFrame(sharedFrameUUID uuid.UUID, sharedFramePtr *SharedFileFrame, key []byte)(err error) {
+	// Marshal AppendNode to byte array
+	unencryptedData, error := json.Marshal(*sharedFramePtr)
+	if error != nil {
+		return error
+	}
+	// Encrypt and mac the data
+	encryptedData := encHmac(key, unencryptedData)
+	// Save to the datastore
+	userlib.DatastoreSet(sharedFrameUUID, encryptedData)
+	return nil
+}
+
 func (userdata *User) loadFileStruct (fileUUID uuid.UUID, fileDecryptionKey []byte, filename string) (fileStructPointer *File, err error){
 	// load the encrypted json data for the file struct
 	encryptedFileStruct, ok := userlib.DatastoreGet(fileUUID)
@@ -447,6 +459,19 @@ func (userdata *User) loadFileStruct (fileUUID uuid.UUID, fileDecryptionKey []by
 	return fileStructPointer, nil
 }
 
+func (userdata *User) saveFileStruct(fileUUID uuid.UUID, filePtr *File, key []byte)(err error) {
+	// Marshal AppendNode to byte array
+	unencryptedData, error := json.Marshal(*filePtr)
+	if error != nil {
+		return error
+	}
+	// Encrypt and mac the data
+	encryptedData := encHmac(key, unencryptedData)
+	// Save to the datastore
+	userlib.DatastoreSet(fileUUID, encryptedData)
+	return nil
+}
+
 func (userdata *User) loadAppendNode(nodeUUID uuid.UUID, nodeDecryptionKey []byte) (appendNodePtr *AppendNode, err error) {
 	// load the encrypted json data for the file struct
 	encryptedNodeStruct, ok := userlib.DatastoreGet(nodeUUID)
@@ -470,8 +495,17 @@ func (userdata *User) loadAppendNode(nodeUUID uuid.UUID, nodeDecryptionKey []byt
 	return appendNodePtr, nil
 }
 
-func (userdata *User) saveAppendNode(nodeUUID uuid.UUID, nodePtr *AppendNode)(err error) {
-	return
+func (userdata *User) saveAppendNode(nodeUUID uuid.UUID, nodePtr *AppendNode, key []byte)(err error) {
+	// Marshal AppendNode to byte array
+	unencryptedData, error := json.Marshal(*nodePtr)
+	if error != nil {
+		return error
+	}
+	// Encrypt and mac the data
+	encryptedData := encHmac(key, unencryptedData)
+	// Save to the datastore
+	userlib.DatastoreSet(nodeUUID, encryptedData)
+	return nil
 }
 
 // Verify the validity of encrypted data using HMAC
@@ -481,6 +515,7 @@ func verifyValidDataHMAC(encryptedData []byte, decryptionKey []byte)(err error) 
 	if error != nil {
 		return error
 	}
+	hashKDFKey = hashKDFKey[:16]
 	hmacCheck, error := userlib.HMACEval(hashKDFKey, encryptedData)
 	if error != nil {
 		return error
