@@ -241,6 +241,8 @@ func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 			jsonFile, _ := json.Marshal(file)
 			encFile := encHmac(fileframe.SymmKey, jsonFile)
 			userlib.DatastoreSet(fileframe.FileUUID, encFile)
+
+			
 		} else {
 			// if we are not the owner
 			//LOAD SHARED FILE FRAME
@@ -321,6 +323,7 @@ func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 		jsonFile, _ := json.Marshal(newFile)
 		encFile := encHmac(fileSymmKey, jsonFile)
 		userlib.DatastoreSet(fileUUID, encFile)
+		userdata.storeUserdata()
 	}
 	// Load the namespace map from the datastore using UUID
 	// If the filename exists in the namespace:
@@ -496,14 +499,26 @@ func (userdata *User) ShareFile(filename string, recipient string) (invitationLo
 // https://cs161.org/assets/projects/2/docs/client_api/receivefile.html
 func (userdata *User) ReceiveFile(filename string, sender string,
 	accessToken uuid.UUID) error {
+	
+	//Check if file already in namespace
+	if _, ok := userdata.Namespace[string(filename)]; ok {
+		return nil, errors.New("File already exists in namespace!")
+	}
 	//RETRIEVE INVITE
+
+	//Retrieve, verify and decrypt Invite
 	allInvite, somethingWrong := userlib.DatastoreGet(uuid.FromBytes(userlib.Hash(userlib.Hash([]byte(sender + filename + userdata.Username)))[:16]))
+	if somethingWrong == false {
+		return nil, errors.new("Something has gone wrong")
+	}
 	inviteSig := encInvite[len(encInvite) - 64:]
 	encInvite := allInvite[:len(encInvite) - 64]
 	pubDSK := userlib.KeystoreGet("DSK" + sender)
 	
+	var invite Invite
 	var sharedFF SharedFileFrame
 	sharedFFptr := &sharedFF
+	inviteptr := &invite
 	if DSVerify(pubDSK, encInvite, inviteSig) != nil {
 		return nil, errors.New("Data has been tampered with!!")
 	}
@@ -512,10 +527,34 @@ func (userdata *User) ReceiveFile(filename string, sender string,
 		return nil, errors.New("Something has gone wrong")
 	}
 
-	errorExists := json.Unmarshal(unEncJson, sharedFFptr)
+	errorExists := json.Unmarshal(unEncJson, inviteptr)
 	if errorExists != nil {
 		return nil, errorExists
 	}
+	
+	encSharedFF, errorExists2 := userlib.DatastoreGet(invite.SharedFileUUID)
+	if errorExists2 == false {
+		return nil, errors.New("Something has gone wrong")
+	}
+
+	jsonSharedFF, errorExists3 := verifyDecrypt(invite.Accessor, encSharedFF)
+	if errorExists3 != nil {
+		return nil, errorExists3
+	}
+
+	errorExists4 := json.Unmarshal(jsonSharedFF, sharedFFptr)
+	if errorExists4 != nil {
+		return nil, errorExists4
+	}
+
+	if sharedFFptr.revoked == true {
+		return nil, errors.New("File access has been revoked")
+	}
+
+	zeroUUID, _ := uuid.FromBytes([]byte(nil))
+	userdata.Namespace[userlib.Hash(filename)] = FileFrame{false, zeroUUID, byte(0), nil, invite.SharedFileUUID, invite.Accessor}
+	userdata.storeUserdata()
+
 	
 	// TODO: Need to verify integrity of SharedFileInvitation as well, can something be MACd and signed?
 	// if namespace.contains(filename), Error: You already contain a file with the same name.
@@ -695,7 +734,20 @@ func (userdata *User) getFileInformationFromFileFrame(fileFramePtr *FileFrame, f
 	}
 	return key, location, nil
 }
-
+//helper function to restore userdata to Datastore
+func (userdata *User) storeUserdata() error {
+	userUUID, _ := uuid.FromBytes(userlib.Hash([]byte(userdata.Username))[:16])
+	hmacKey, _ := userlib.HashKDF(userdata.Masterkey, []byte("hmac"))
+	hmacKey = hmacKey[:16]
+	toJson, _ := json.Marshal(userdata)
+	iv := userlib.RandomBytes(16)
+	jsonEnc := encryptData(userdata.Masterkey, iv, toJson)
+	signature, _ := userlib.DSSign(userdata.Privdsk, jsonEnc)
+	hmac, _ := userlib.HMACEval(hmacKey, jsonEnc)
+	sigAndHmac := append(signature, hmac...)
+	finalJson := append(jsonEnc, sigAndHmac...)
+	userlib.DatastoreSet(userUUID, finalJson)
+}
 // Verify the validity of encrypted data using HMAC
 func verifyValidDataHMAC(encryptedData []byte, decryptionKey []byte)(err error) {
 	hmac := encryptedData[len(encryptedData) - 64:]
