@@ -204,7 +204,7 @@ func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 	if _, ok := userdata.Namespace[string(hashFName)]; ok {
 		fileframe := userdata.Namespace[string(hashFName)]
 		if fileframe.IsOwner == true {
-			
+
 
 			appendUUID, _ := uuid.FromBytes(userlib.RandomBytes(16))
 			appendKey, _ := userlib.HashKDF(fileSymmKey, []byte{1})
@@ -426,25 +426,13 @@ func (userdata *User) loadSharedFileFrame(fileFrame FileFrame, filename string)(
 	if !ok {
 		return &SharedFileFrame{}, errors.New("Could not load encrypted shared frame from DataStore.")
 	}
-	// ensure that the data matches symmetric encryption block size
-	if len(encryptedSharedFrame) % userlib.AESBlockSizeBytes != 0 {
-		return &SharedFileFrame{}, errors.New("Incorrect block size.")
-	}
 	// verify the data has not been tampered with
-	hmac := encryptedSharedFrame[len(encryptedSharedFrame) - 64:]
-	hashKDFKey, error := userlib.HashKDF(fileFrame.AccessToken, []byte("hmac"))
+	error := verifyValidDataHMAC(encryptedSharedFrame, fileFrame.AccessToken)
 	if error != nil {
 		return &SharedFileFrame{}, error
-	}
-	hmacCheck, error := userlib.HMACEval(hashKDFKey, encryptedSharedFrame)
-	if error != nil {
-		return &SharedFileFrame{}, error
-	}
-	if !userlib.HMACEqual(hmacCheck, hmac) {
-		return &SharedFileFrame{}, errors.New("Data has been tampered with.")
 	}
 	// decrypt the information
-	unencryptedSharedFrame := userlib.SymDec(fileFrame.AccessToken, encryptedSharedFrame)
+	unencryptedSharedFrame := decryptData(fileFrame.AccessToken, encryptedSharedFrame)
 	// unmarshall the data
 	var sharedFrameFinal SharedFileFrame
 	sharedFileFramePointer = &sharedFrameFinal
@@ -452,6 +440,8 @@ func (userdata *User) loadSharedFileFrame(fileFrame FileFrame, filename string)(
 	if errorExists != nil {
 		return &SharedFileFrame{}, errors.New("Incorrect data structure")
 	}
+
+	// If the access has been revoked, delete the file from the namespace
 	if sharedFrameFinal.Revoked {
 		delete(userdata.Namespace, string(userlib.Hash([]byte(filename))))
 		return sharedFileFramePointer, errors.New("File access has been revoked")
@@ -461,35 +451,39 @@ func (userdata *User) loadSharedFileFrame(fileFrame FileFrame, filename string)(
 	return sharedFileFramePointer, nil
 }
 
+func (userdata *User) saveSharedFileFrame(sharedFrameUUID uuid.UUID, sharedFramePtr *SharedFileFrame, key []byte)(err error) {
+	// Marshal AppendNode to byte array
+	unencryptedData, error := json.Marshal(*sharedFramePtr)
+	if error != nil {
+		return error
+	}
+	// Encrypt and mac the data
+	encryptedData := encHmac(key, unencryptedData)
+	// Save to the datastore
+	userlib.DatastoreSet(sharedFrameUUID, encryptedData)
+	return nil
+}
+
 func (userdata *User) loadFileStruct (fileUUID uuid.UUID, fileDecryptionKey []byte, filename string) (fileStructPointer *File, err error){
 	// load the encrypted json data for the file struct
 	encryptedFileStruct, ok := userlib.DatastoreGet(fileUUID)
 	if !ok {
 		return &File{}, errors.New("Could not load encrypted file struct from DataStore.")
 	}
-	// ensure that data matches symmetric encryption block size
-	if len(encryptedFileStruct) % userlib.AESBlockSizeBytes != 0 {
-		return &File{}, errors.New("Incorrect block size.")
-	}
 	// verify the data has not been tampered with
-	hmac := encryptedFileStruct[len(encryptedFileStruct) - 64:]
-	hashKDFKey, error := userlib.HashKDF(fileDecryptionKey, []byte("hmac"))
+	error := verifyValidDataHMAC(encryptedFileStruct, fileDecryptionKey)
 	if error != nil {
 		return &File{}, error
-	}
-	hmacCheck, error := userlib.HMACEval(hashKDFKey, encryptedFileStruct)
-	if error != nil {
-		return &File{}, error
-	}
-	if !userlib.HMACEqual(hmacCheck, hmac) {
-		return &File{}, errors.New("Data has been tampered with.")
 	}
 	// decrypt the information
-	unencryptedFileStruct := userlib.SymDec(fileDecryptionKey, encryptedFileStruct)
+	unencryptedFileStruct := decryptData(fileDecryptionKey, encryptedFileStruct)
 	// unmarshall the data
 	var fileStructFinal File
 	fileStructPointer = &fileStructFinal
 	errorExists := json.Unmarshal(unencryptedFileStruct, fileStructPointer)
+
+	// if the data could not be unmarshalled, the decryption did not work, key was changed
+	// remove the file from the namespace
 	if errorExists != nil {
 		delete(userdata.Namespace, string(userlib.Hash([]byte(filename))))
 		return &File{}, errors.New("Incorrect data structure.")
@@ -497,9 +491,76 @@ func (userdata *User) loadFileStruct (fileUUID uuid.UUID, fileDecryptionKey []by
 	return fileStructPointer, nil
 }
 
+func (userdata *User) saveFileStruct(fileUUID uuid.UUID, filePtr *File, key []byte)(err error) {
+	// Marshal AppendNode to byte array
+	unencryptedData, error := json.Marshal(*filePtr)
+	if error != nil {
+		return error
+	}
+	// Encrypt and mac the data
+	encryptedData := encHmac(key, unencryptedData)
+	// Save to the datastore
+	userlib.DatastoreSet(fileUUID, encryptedData)
+	return nil
+}
+
+func (userdata *User) loadAppendNode(nodeUUID uuid.UUID, nodeDecryptionKey []byte) (appendNodePtr *AppendNode, err error) {
+	// load the encrypted json data for the file struct
+	encryptedNodeStruct, ok := userlib.DatastoreGet(nodeUUID)
+	if !ok {
+		return &AppendNode{}, errors.New("Could not load encrypted file struct from DataStore.")
+	}
+	// verify the data has not been tampered with
+	error := verifyValidDataHMAC(encryptedNodeStruct, nodeDecryptionKey)
+	if error != nil {
+		return &AppendNode{}, error
+	}
+	// decrypt the information
+	unencryptedNodeStruct := decryptData(nodeDecryptionKey, encryptedNodeStruct)
+	// unmarshall the data
+	var node AppendNode
+	appendNodePtr = &node
+	errorExists := json.Unmarshal(unencryptedNodeStruct, appendNodePtr)
+	if errorExists != nil {
+		return &AppendNode{}, errors.New("Incorrect data structure")
+	}
+	return appendNodePtr, nil
+}
+
+func (userdata *User) saveAppendNode(nodeUUID uuid.UUID, nodePtr *AppendNode, key []byte)(err error) {
+	// Marshal AppendNode to byte array
+	unencryptedData, error := json.Marshal(*nodePtr)
+	if error != nil {
+		return error
+	}
+	// Encrypt and mac the data
+	encryptedData := encHmac(key, unencryptedData)
+	// Save to the datastore
+	userlib.DatastoreSet(nodeUUID, encryptedData)
+	return nil
+}
+
+// Verify the validity of encrypted data using HMAC
+func verifyValidDataHMAC(encryptedData []byte, decryptionKey []byte)(err error) {
+	hmac := encryptedData[len(encryptedData) - 64:]
+	hashKDFKey, error := userlib.HashKDF(decryptionKey, []byte("hmac"))
+	if error != nil {
+		return error
+	}
+	hashKDFKey = hashKDFKey[:16]
+	hmacCheck, error := userlib.HMACEval(hashKDFKey, encryptedData)
+	if error != nil {
+		return error
+	}
+	if !userlib.HMACEqual(hmacCheck, hmac) {
+		return errors.New("Data has been tampered with.")
+	}
+	return nil
+}
 
 //SymDec(), but accounts for padding
 func decryptData(key []byte, ciphertext []byte) ([]byte) {
+	// TODO: Add a check to ensure that ciphertext % blocksize == 0 before calling SymDec
 	paddedData := userlib.SymDec(key, ciphertext)
 	lenpadding := paddedData[len(paddedData) - 1]
 	data := paddedData[:len(paddedData) - int(lenpadding)]
