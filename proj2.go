@@ -502,57 +502,58 @@ func (userdata *User) ReceiveFile(filename string, sender string,
 	
 	//Check if file already in namespace
 	if _, ok := userdata.Namespace[string(filename)]; ok {
-		return nil, errors.New("File already exists in namespace!")
+		return errors.New("File already exists in namespace!")
 	}
 	//RETRIEVE INVITE
 
 	//Retrieve, verify and decrypt Invite
-	allInvite, somethingWrong := userlib.DatastoreGet(uuid.FromBytes(userlib.Hash(userlib.Hash([]byte(sender + filename + userdata.Username)))[:16]))
+	inviteUUID, _ := uuid.FromBytes(userlib.Hash(userlib.Hash([]byte(sender + filename + userdata.Username)))[:16])
+	allInvite, somethingWrong := userlib.DatastoreGet(inviteUUID)
 	if somethingWrong == false {
-		return nil, errors.new("Something has gone wrong")
+		return errors.New("Something has gone wrong")
 	}
-	inviteSig := encInvite[len(encInvite) - 64:]
-	encInvite := allInvite[:len(encInvite) - 64]
-	pubDSK := userlib.KeystoreGet("DSK" + sender)
+	inviteSig := allInvite[len(allInvite) - 64:]
+	encInvite := allInvite[:len(allInvite) - 64]
+	pubDSK, _ := userlib.KeystoreGet("DSK" + sender)
 	
 	var invite Invite
 	var sharedFF SharedFileFrame
 	sharedFFptr := &sharedFF
 	inviteptr := &invite
-	if DSVerify(pubDSK, encInvite, inviteSig) != nil {
-		return nil, errors.New("Data has been tampered with!!")
+	if userlib.DSVerify(pubDSK, encInvite, inviteSig) != nil {
+		return errors.New("Data has been tampered with!!")
 	}
 	unEncJson, somethingWrong2 := userlib.PKEDec(userdata.Privdsk, encInvite)
 	if somethingWrong2 != nil {
-		return nil, errors.New("Something has gone wrong")
+		return errors.New("Something has gone wrong")
 	}
 
 	errorExists := json.Unmarshal(unEncJson, inviteptr)
 	if errorExists != nil {
-		return nil, errorExists
+		return errorExists
 	}
 	
 	encSharedFF, errorExists2 := userlib.DatastoreGet(invite.SharedFileUUID)
 	if errorExists2 == false {
-		return nil, errors.New("Something has gone wrong")
+		return errors.New("Something has gone wrong")
 	}
 
 	jsonSharedFF, errorExists3 := verifyDecrypt(invite.Accessor, encSharedFF)
 	if errorExists3 != nil {
-		return nil, errorExists3
+		return errorExists3
 	}
 
 	errorExists4 := json.Unmarshal(jsonSharedFF, sharedFFptr)
 	if errorExists4 != nil {
-		return nil, errorExists4
+		return errorExists4
 	}
 
-	if sharedFFptr.revoked == true {
-		return nil, errors.New("File access has been revoked")
+	if sharedFFptr.Revoked == true {
+		return errors.New("File access has been revoked")
 	}
 
 	zeroUUID, _ := uuid.FromBytes([]byte(nil))
-	userdata.Namespace[userlib.Hash(filename)] = FileFrame{false, zeroUUID, byte(0), nil, invite.SharedFileUUID, invite.Accessor}
+	userdata.Namespace[string(userlib.Hash([]byte(filename)))] = FileFrame{false, zeroUUID, []byte(nil), nil, invite.SharedFileUUID, invite.Accessor}
 	userdata.storeUserdata()
 
 	
@@ -747,6 +748,8 @@ func (userdata *User) storeUserdata() error {
 	sigAndHmac := append(signature, hmac...)
 	finalJson := append(jsonEnc, sigAndHmac...)
 	userlib.DatastoreSet(userUUID, finalJson)
+
+	return nil
 }
 // Verify the validity of encrypted data using HMAC
 func verifyValidDataHMAC(encryptedData []byte, decryptionKey []byte)(err error) {
