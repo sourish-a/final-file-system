@@ -203,12 +203,27 @@ func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 	hashFName := userlib.Hash([]byte(filename))
 	if _, ok := userdata.Namespace[string(hashFName)]; ok {
 		fileframe := userdata.Namespace[string(hashFName)]
+		var file File
+		fileptr := &file
 		if fileframe.IsOwner == true {
-
+			//if file exists already, and we are the owner
+			encFileStruct, somethingWrong := userlib.DatastoreGet(fileframe.FileUUID)
+			if somethingWrong == true {
+				return somethingWrong
+			}
+			jsonFileStruct, tampering := verifyDecrypt()
+			if tampering != nil {
+				return tampering
+			}
+			errorExists := json.Unmarshal(jsonFileStruct, fileptr)
+			if errorExists != nil {
+				return errorExists
+			}
 
 			appendUUID, _ := uuid.FromBytes(userlib.RandomBytes(16))
-			appendKey, _ := userlib.HashKDF(fileSymmKey, []byte{1})
+			appendKey, _ := userlib.HashKDF(file.SymmKey, []byte{1})
 			appendKey = appendKey[:16]
+
 			jsonAppend, _ := json.Marshal(newAppend)
 			randIV := userlib.RandomBytes(16)
 			encAppend := encryptData(appendKey, randIV, jsonAppend) // encrypting AppendNode w/ HKDF(SymmKey, appends)
@@ -217,12 +232,16 @@ func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 			hmacAppend, _ := userlib.HMACEval(hmacAppendKey, encAppend)
 			appendAndHmac := append(encAppend, hmacAppend...)
 			userlib.DatastoreSet(appendUUID, appendAndHmac)
-			newFile := File{1, appendUUID, appendUUID}
-			jsonFile := json.Marshal(newFile)
-			encFile := encHmac(fileSymmKey, jsonFile)
+
+			file.Appends = 1
+			file.FirstAppend = appendUUID
+			file.LastAppend = appendUUID
+			jsonFile := json.Marshal(file)
+			encFile := encHmac(file.SymmKey, jsonFile)
 			userlib.DatastoreSet(fileUUID, encFile)
 		} else {
-
+			// if we are not the owner
+			/*
 			appendUUID, _ := uuid.FromBytes(userlib.RandomBytes(16))
 			appendKey, _ := userlib.HashKDF(fileSymmKey, []byte{1})
 			appendKey = appendKey[:16]
@@ -238,6 +257,8 @@ func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 			jsonFile := json.Marshal(newFile)
 			encFile := encHmac(fileSymmKey, jsonFile)
 			userlib.DatastoreSet(fileUUID, encFile)
+			*/
+			panic("sup")
 		}
 	} else {
 		//file not in namespace
@@ -566,6 +587,7 @@ func decryptData(key []byte, ciphertext []byte) ([]byte) {
 	data := paddedData[:len(paddedData) - int(lenpadding)]
 	return data
 }
+
 //SymEnC(), but add padding
 func encryptData(key []byte, iv []byte, ciphertext []byte) ([]byte) {
 	lenpadding := 16 - len(ciphertext) % 16
@@ -587,4 +609,17 @@ func encHmac(key []byte, ciphertext []byte) ([]byte) {
 	hmac, _ := userlib.HMACEval(hmacKey, encData)
 
 	return append(encData, hmac...)
+}
+
+//verifys the HMAC then decrypts data
+func verifyDecrypt(key []byte, ciphertext []byte) ([]byte, error){
+	hmac := ciphertext[len(ciphertext) - 64:]
+	encData := ciphertext[:len(ciphertext) - 64]
+	hmacKey := userlib.HashKDF(key, []byte("hmac"))
+	hmacKey = hmacKey[:16]
+	dataHmac, _ := HMACEval(hmacKey, encData)
+	if HMACEqual(hmac, dataHmac) != true {
+		return nil, error.New("Data has been tampered with!!")
+	}
+	return decryptData(key, encData), nil
 }
