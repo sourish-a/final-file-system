@@ -458,3 +458,7 @@ func (userdata *User) loadFileStruct (fileUUID uuid.UUID, fileDecryptionKey []by
 	}
 	return fileStructPointer, nil
 }
+
+func (userdata *User) loadAppendNode () (appendNodePtr *AppendNode, err error) {
+	
+}
