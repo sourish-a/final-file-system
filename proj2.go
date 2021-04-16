@@ -692,7 +692,7 @@ func (userdata *User) saveSharedFileFrame(sharedFrameUUID uuid.UUID, sharedFrame
 	return nil
 }
 
-func (userdata *User) loadFileStruct (fileUUID uuid.UUID, fileDecryptionKey []byte, filename string) (fileStructPointer *File, err error){
+func (userdata *User) loadFileStruct(fileUUID uuid.UUID, fileDecryptionKey []byte, filename string) (fileStructPointer *File, err error){
 	// load the encrypted json data for the file struct
 	encryptedFileStruct, ok := userlib.DatastoreGet(fileUUID)
 	if !ok {
@@ -704,6 +704,7 @@ func (userdata *User) loadFileStruct (fileUUID uuid.UUID, fileDecryptionKey []by
 		return &File{}, error
 	}
 	// decrypt the information
+	encryptedFileStruct = encryptedFileStruct[:len(encryptedFileStruct) - 64]
 	unencryptedFileStruct := decryptData(fileDecryptionKey, encryptedFileStruct)
 	// unmarshall the data
 	var fileStructFinal File
@@ -740,9 +741,11 @@ func (userdata *User) loadAppendNode(nodeUUID uuid.UUID, nodeDecryptionKey []byt
 	}
 	// decrypt the information
 	hashKDFkey, error := userlib.HashKDF(nodeDecryptionKey, []byte{byte(appends)})
+	hashKDFkey = hashKDFkey[:16]
 	if error != nil {
 		return &AppendNode{}, error
 	}
+	userlib.DebugMsg("fileUUID: %s\n", "hi")
 	unencryptedNodeStruct, errorExists := verifyDecrypt(hashKDFkey, encryptedNodeStruct)
 	if errorExists != nil {
 		return &AppendNode{}, errorExists
@@ -815,17 +818,18 @@ func (userdata *User) storeUserdata() error {
 // Verify the validity of encrypted data using HMAC
 func verifyValidDataHMAC(encryptedData []byte, decryptionKey []byte)(err error) {
 	hmac := encryptedData[len(encryptedData) - 64:]
+	justEncData := encryptedData[:len(encryptedData) - 64] //first error
 	hashKDFKey, error := userlib.HashKDF(decryptionKey, []byte("hmac"))
 	if error != nil {
 		return error
 	}
 	hashKDFKey = hashKDFKey[:16]
-	hmacCheck, error := userlib.HMACEval(hashKDFKey, encryptedData)
+	hmacCheck, error := userlib.HMACEval(hashKDFKey, justEncData)
 	if error != nil {
 		return error
 	}
 	if !userlib.HMACEqual(hmacCheck, hmac) {
-		return errors.New("Data has been tampered with.")
+		return errors.New("Data has been tampered with. :)")
 	}
 	return nil
 }
