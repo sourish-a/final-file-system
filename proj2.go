@@ -742,7 +742,7 @@ func (userdata *User) loadAppendNode(nodeUUID uuid.UUID, nodeDecryptionKey []byt
 	if error != nil {
 		return &AppendNode{}, error
 	}
-	unencryptedNodeStruct, errorExists := verifyDecrypt(nodeDecryptionKey, encryptedNodeStruct)
+	unencryptedNodeStruct, errorExists := verifyDecrypt(hashKDFkey, encryptedNodeStruct)
 	if errorExists != nil {
 		return &AppendNode{}, errorExists
 	}
