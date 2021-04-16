@@ -144,6 +144,8 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	hmacKey = hmacKey[:16]
 	userdata.Namespace = make(map[string]FileFrame)
 	toJson, _ := json.Marshal(userdata)
+
+
 	iv := userlib.RandomBytes(16)
 	jsonEnc := encryptData(userdata.Masterkey, iv, toJson)
 	userlib.KeystoreSet("RSA" + username , pubRSA)
@@ -172,8 +174,8 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 	hmac := retrieved[len(retrieved) - 64:]
 	signature := retrieved[len(retrieved) - 320:len(retrieved) - 64]
 	encJson := retrieved[:len(retrieved) - 320]
-	pubRSA, _ := userlib.KeystoreGet("RSA" + username)
-	if userlib.DSVerify(pubRSA, encJson, signature) != nil {
+	pubDSK, _ := userlib.KeystoreGet("DSK" + username)
+	if userlib.DSVerify(pubDSK, encJson, signature) != nil {
 		panic("Data has been tampered with!!")
 		return nil, errors.New("Data has been tampered with!")
 	}
@@ -228,7 +230,8 @@ func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 		hmacAppend, _ := userlib.HMACEval(hmacAppendKey, encAppend)
 		appendAndHmac := append(encAppend, hmacAppend...)
 		userlib.DatastoreSet(appendUUID, appendAndHmac)
-		//newFile := File{1, appendUUID, appendUUID}
+		newFile := File{1, appendUUID, appendUUID}
+		encFile := 
 	}
 	// Load the namespace map from the datastore using UUID
 	// If the filename exists in the namespace:
@@ -507,4 +510,14 @@ func encryptData(key []byte, iv []byte, ciphertext []byte) ([]byte) {
 	paddedData := append(ciphertext, padding...)
 	encData := userlib.SymEnc(key, iv, paddedData)
 	return encData
+}
+
+//encrypts and HMACs the ciphertext using key
+func encHmac(key []byte, ciphertext []byte) ([]byte) { 
+	encData := encryptData(key, userlib.RandomBytes(16), ciphertext)
+	hmacKey, _ := userlib.HashKDF(key, []byte("hmac"))
+	hmacKey = hmacKey[:16]
+	hmac, _ := userlib.HMACEval(hmacKey, encData)
+
+	return append(encData, hmac...)
 }
