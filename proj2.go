@@ -598,6 +598,7 @@ func (userdata *User) RevokeFile(filename string, targetUsername string) (err er
 
 	// update symmkeys
 	newSymmKey, error := userlib.HashKDF(userdata.Masterkey, userlib.RandomBytes(16))
+	newSymmKey = newSymmKey[:16]
 	if error != nil {
 		return error
 	}
@@ -768,6 +769,7 @@ func (userdata *User) saveAppendNode(nodeUUID uuid.UUID, nodePtr *AppendNode, ke
 	}
 	// Encrypt and mac the data
 	hashKDFkey, error := userlib.HashKDF(key, []byte{byte(appends)})
+	hashKDFkey = hashKDFkey[:16]
 	if error != nil {
 		return error
 	}
@@ -820,10 +822,10 @@ func verifyValidDataHMAC(encryptedData []byte, decryptionKey []byte)(err error) 
 	hmac := encryptedData[len(encryptedData) - 64:]
 	justEncData := encryptedData[:len(encryptedData) - 64] //first error
 	hashKDFKey, error := userlib.HashKDF(decryptionKey, []byte("hmac"))
+	hashKDFKey = hashKDFKey[:16]
 	if error != nil {
 		return error
 	}
-	hashKDFKey = hashKDFKey[:16]
 	hmacCheck, error := userlib.HMACEval(hashKDFKey, justEncData)
 	if error != nil {
 		return error

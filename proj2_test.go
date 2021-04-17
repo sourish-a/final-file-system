@@ -22,7 +22,7 @@ func clear() {
 	userlib.DatastoreClear()
 	userlib.KeystoreClear()
 }
-/*
+
 func TestInit(t *testing.T) {
 	clear()
 	t.Log("Initialization test")
@@ -42,7 +42,7 @@ func TestInit(t *testing.T) {
 	// write _ = u here to make the compiler happy
 	// You probably want many more tests here.
 }
-*/
+
 func TestCrypt(t *testing.T) {
 	clear()
 	t.Log("Encryption/Decryption test")
@@ -106,7 +106,6 @@ func TestInvalidFile(t *testing.T) {
 		return
 	}
 }
-
 /*
 func TestShare(t *testing.T) {
 	clear()
