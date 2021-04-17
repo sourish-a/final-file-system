@@ -207,3 +207,69 @@ func TestPUBLICSHARE(t *testing.T) {
 		return
 	}
 }
+
+func TestAppendFile(t *testing.T) {
+	clear()
+	u, err := InitUser("alice", "fubar")
+	if err != nil {
+		t.Error("Failed to initialize user", err)
+		return
+	}
+	v := []byte("This is a test. ") //STORING FILE
+	u.StoreFile("file1", v)
+	u.AppendFile("file1", []byte("Append 1. "))
+	u.AppendFile("file1", []byte("Append 2. "))
+	u.AppendFile("file1", []byte("Append 3. "))
+	u.AppendFile("file1", []byte("Append 4. "))
+	v2 := []byte("This is a test. Append 1. Append 2. Append 3. Append 4. ")
+	u.StoreFile("file2", v2)
+	file1_loaded, err := u.LoadFile("file1")
+	if err != nil {
+		t.Error("Failed to download file 1.")
+		return
+	}
+	file2_loaded, err := u.LoadFile("file2")
+	if err != nil {
+		t.Error("Failed to download file 2.")
+		return
+	}
+	if !reflect.DeepEqual(file1_loaded, file2_loaded) {
+		t.Error("Shared file is not the same", file1_loaded, file2_loaded)
+		return
+	}
+}
+
+/*
+func TestRevokeFile(t *testing.T) {
+	clear()
+	u, err := InitUser("Alice", "Fubar")
+	if err != nil {
+		t.Error("Failed to initialize user", err)
+		return
+	}
+	u2, err2 := InitUser("bob", "foobar")
+	if err2 != nil {
+		t.Error("Failed to initialize bob", err2)
+		return
+	}
+	u3, err3 := InitUser("Joe", "foobar")
+	if err2 != nil {
+		t.Error("Failed to initialize bob", err2)
+		return
+	}
+	u4, err3 := InitUser("JoesChild", "foobar")
+	if err2 != nil {
+		t.Error("Failed to initialize bob", err2)
+		return
+	}
+	u5, err3 := InitUser("BobsChild", "foobar")
+	if err2 != nil {
+		t.Error("Failed to initialize bob", err2)
+		return
+	}
+
+	v := []byte("This is a test") //STORING FILE
+	u.StoreFile("file1", v)
+
+}
+*/

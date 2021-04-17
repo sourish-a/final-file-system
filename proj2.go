@@ -379,12 +379,12 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 	// Load AppendNode from LastAppendUUID (from the Datastore) and unencrypt it by HKDF(Symmkey, appends) and check MAC
 	// Set nextAppendNode to this new UUID
 	// Reencrypt and MAC using HKDF(symmkey, appends), put back in datastore at LastAppendUUID
-	previouslyLastAppendNode, error := userdata.loadAppendNode(file.LastAppend, fileFrame.SymmKey, file.Appends)
+	previouslyLastAppendNode, error := userdata.loadAppendNode(file.LastAppend, fileDecryptionKey, file.Appends)
 	if error != nil {
 		return error
 	}
 	previouslyLastAppendNode.NextPtr = newNodeUUID
-	error = userdata.saveAppendNode(file.LastAppend, previouslyLastAppendNode, fileFrame.SymmKey, file.Appends)
+	error = userdata.saveAppendNode(file.LastAppend, previouslyLastAppendNode, fileDecryptionKey, file.Appends)
 	if error != nil {
 		return error
 	}
@@ -398,11 +398,11 @@ func (userdata *User) AppendFile(filename string, data []byte) (err error) {
 	zeroUUID, _ := uuid.FromBytes([]byte(nil))
 	newAppendNode := AppendNode{data, zeroUUID, file.Appends}
 	// Encrypt + MAC the append node using HKDF(Symmkey, appends), save in Datastore with the newly generated UUID
-	error = userdata.saveAppendNode(file.LastAppend, &newAppendNode, fileFrame.SymmKey, file.Appends)
+	error = userdata.saveAppendNode(file.LastAppend, &newAppendNode, fileDecryptionKey, file.Appends)
 	if error != nil {
 		return error
 	}
-	error = userdata.saveFileStruct(fileUUID, file, fileFrame.SymmKey)
+	error = userdata.saveFileStruct(fileUUID, file, fileDecryptionKey)
 	if error != nil {
 		return error
 	}
