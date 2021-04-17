@@ -858,6 +858,9 @@ func encryptData(key []byte, iv []byte, ciphertext []byte) ([]byte) {
 
 //encrypts and HMACs the ciphertext using key
 func encHmac(key []byte, ciphertext []byte) ([]byte) { 
+	if len(key) > 16 {
+		key = key[:16]
+	}
 	encData := encryptData(key, userlib.RandomBytes(16), ciphertext)
 	hmacKey, _ := userlib.HashKDF(key, []byte("hmac"))
 	hmacKey = hmacKey[:16]

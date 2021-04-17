@@ -108,6 +108,7 @@ func TestInvalidFile(t *testing.T) {
 }
 
 
+
 func TestShare(t *testing.T) {
 	clear()
 	u, err := InitUser("alice", "fubar")
@@ -141,6 +142,59 @@ func TestShare(t *testing.T) {
 	err = u2.ReceiveFile("file2", "alice", accessToken)
 	if err != nil {
 		t.Error("Failed to receive the share message", err)
+		return
+	}
+
+	v2, err = u2.LoadFile("file2")
+	if err != nil {
+		t.Error("Failed to download the file after sharing", err)
+		return
+	}
+	if !reflect.DeepEqual(v, v2) {
+		t.Error("Shared file is not the same", v, v2)
+		return
+	}
+}
+
+func TestPUBLICSHARE(t *testing.T) {
+	clear()
+	u, err := InitUser("alice", "fubar")
+	if err != nil {
+		t.Error("Failed to initialize user", err)
+		return
+	}
+	u2, err2 := InitUser("bob", "foobar")
+	if err2 != nil {
+		t.Error("Failed to initialize bob", err2)
+		return
+	}
+
+	v := []byte("This is a test") //STORING FILE
+	u.StoreFile("file1", v)
+
+	var v2 []byte
+	var accessToken uuid.UUID
+
+	v, err = u.LoadFile("file1")
+	if err != nil {
+		t.Error("Failed to download the file from alice", err)
+		return
+	}
+
+	accessToken, err = u.ShareFile("file1", "bob")
+	if err != nil {
+		t.Error("Failed to share the a file", err)
+		return
+	}
+	err = u2.ReceiveFile("file2", "alice", accessToken) //SHARING FILE
+	if err != nil {
+		t.Error("Failed to receive the share message", err)
+		return
+	}
+
+	err = u2.AppendFile("file2", []byte(" this is an append"))
+	if err != nil {
+		t.Error("Unable to append to shared file")
 		return
 	}
 
