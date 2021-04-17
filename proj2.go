@@ -422,7 +422,6 @@ func (userdata *User) LoadFile(filename string) (dataBytes []byte, err error) { 
 	if error != nil {
 		return nil, error
 	}
-	userlib.DebugMsg("Loaded Data: %s\n", "hi")
 	// Load and decrypt fileStruct and verify validity (invalid then error)
 	file, error := userdata.loadFileStruct(fileUUID, fileDecryptionKey, filename)
 	if error != nil {
