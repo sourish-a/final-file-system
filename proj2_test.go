@@ -22,7 +22,7 @@ func clear() {
 	userlib.DatastoreClear()
 	userlib.KeystoreClear()
 }
-
+/*
 func TestInit(t *testing.T) {
 	clear()
 	t.Log("Initialization test")
@@ -42,7 +42,7 @@ func TestInit(t *testing.T) {
 	// write _ = u here to make the compiler happy
 	// You probably want many more tests here.
 }
-
+*/
 func TestCrypt(t *testing.T) {
 	clear()
 	t.Log("Encryption/Decryption test")
@@ -106,6 +106,7 @@ func TestInvalidFile(t *testing.T) {
 		return
 	}
 }
+
 
 
 func TestShare(t *testing.T) {
@@ -174,11 +175,7 @@ func TestPUBLICSHARE(t *testing.T) {
 	var v2 []byte
 	var accessToken uuid.UUID
 
-	v, err = u.LoadFile("file1")
-	if err != nil {
-		t.Error("Failed to download the file from alice", err)
-		return
-	}
+
 
 	accessToken, err = u.ShareFile("file1", "bob")
 	if err != nil {
@@ -191,9 +188,16 @@ func TestPUBLICSHARE(t *testing.T) {
 		return
 	}
 
+	userlib.DebugMsg("Loaded Data: %s\n", "hi")
 	err = u2.AppendFile("file2", []byte(" this is an append"))
 	if err != nil {
 		t.Error("Unable to append to shared file")
+		return
+	}
+
+	v, err = u.LoadFile("file1")
+	if err != nil {
+		t.Error("Failed to download the file from alice", err)
 		return
 	}
 
