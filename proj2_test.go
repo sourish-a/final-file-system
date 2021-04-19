@@ -238,7 +238,7 @@ func TestPUBLICSHARE(t *testing.T) {
 	}
 }
 
-func TestAppendFile(t *testing.T) {
+func TestAppendFileBasic(t *testing.T) {
 	clear()
 	u, err := InitUser("alice", "fubar")
 	if err != nil {
@@ -247,12 +247,26 @@ func TestAppendFile(t *testing.T) {
 	}
 	v := []byte("This is a test. ") //STORING FILE
 	u.StoreFile("file1", v)
-	u.AppendFile("file1", []byte("Append 1. "))
-	u.AppendFile("file1", []byte("Append 2. "))
-	u.AppendFile("file1", []byte("Append 3. "))
-	u.AppendFile("file1", []byte("Append 4. "))
+	err = u.AppendFile("file1", []byte("Append 1. "))
+	if err != nil {
+		t.Error("Append1 failed: ", err)
+	}
+	err = u.AppendFile("file1", []byte("Append 2. "))
+	if err != nil {
+		t.Error("Append2 failed: ", err)
+	}
+	err = u.AppendFile("file1", []byte("Append 3. "))
+	if err != nil {
+		t.Error("Append3 failed: ", err)
+	}
+	err = u.AppendFile("file1", []byte("Append 4. "))
+	if err != nil {
+		t.Error("Append4 failed: ", err)
+	}
+
 	v2 := []byte("This is a test. Append 1. Append 2. Append 3. Append 4. ")
 	u.StoreFile("file2", v2)
+
 	file1_loaded, err := u.LoadFile("file1")
 	if err != nil {
 		t.Error("Failed to download file 1.")
@@ -264,12 +278,38 @@ func TestAppendFile(t *testing.T) {
 		return
 	}
 	if !reflect.DeepEqual(file1_loaded, file2_loaded) {
-		t.Error("Shared file is not the same", file1_loaded, file2_loaded)
+		t.Error("Appends did not work: ", file1_loaded, file2_loaded)
 		return
 	}
 }
 
 func TestShareThenAppend(t *testing.T) {
+	clear()
+	// initialize users
+	alice, _ := InitUser("Alice", "ImSoPretty")
+	bob, _ := InitUser("Bob", "MyNameIsBob")
+
+	f := []byte("Test file for this testcase.")
+	alice.StoreFile("file1", f)
+
+	recUUID, _ := alice.ShareFile("file1", "Bob")
+	bob.ReceiveFile("file1", "Alice", recUUID)
+
+	alice_loaded_file, _ := alice.LoadFile("file1")
+	bob_loaded_file, _ := bob.LoadFile("file1")
+	if !reflect.DeepEqual(alice_loaded_file, bob_loaded_file) {
+		t.Error("Bob's shared file is not the same: ", alice_loaded_file, bob_loaded_file)
+		return
+	}
+
+	alice.AppendFile("file1", []byte("Append 1. "))
+
+	alice_loaded_file, _ = alice.LoadFile("file1")
+	bob_loaded_file, _ = bob.LoadFile("file1")
+	if !reflect.DeepEqual(alice_loaded_file, bob_loaded_file) {
+		t.Error("Bob's shared file is not the same after append: ", alice_loaded_file, bob_loaded_file)
+		return
+	}
 	return
 }
 
