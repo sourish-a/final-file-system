@@ -131,7 +131,6 @@ func InitUser(username string, password string) (userdataptr *User, err error) {
 	userUUID, _ := uuid.FromBytes(userlib.Hash([]byte(username))[:16])
 	_, userExists := userlib.DatastoreGet(userUUID)
 	if userExists == true {
-		panic("User already exists")
 		return nil, errors.New("User already exists")
 	}
 	userdata.Username = username
@@ -168,30 +167,26 @@ func GetUser(username string, password string) (userdataptr *User, err error) {
 	userUUID, _ := uuid.FromBytes(userlib.Hash([]byte(username))[:16])
 	retrieved, exists := userlib.DatastoreGet(userUUID) // retrieved = encJson + signature + hmac
 	if exists == false {
-		panic("username does not exist")
-		return nil, errors.New("username does not exist")
+		return nil, errors.New("Username does not exist")
 	}
+	master := userlib.Argon2Key([]byte(password), userlib.Hash([]byte(username)), 16)
 	hmac := retrieved[len(retrieved) - 64:]
 	signature := retrieved[len(retrieved) - 320:len(retrieved) - 64]
 	encJson := retrieved[:len(retrieved) - 320]
+	unEncJson := decryptData(master, encJson)
+	errorExists := json.Unmarshal(unEncJson, userdataptr)
+	if errorExists != nil {
+		return nil, errors.New("incorrect password")
+	}
 	pubDSK, _ := userlib.KeystoreGet("DSK" + username)
 	if userlib.DSVerify(pubDSK, encJson, signature) != nil {
-		panic("Data has been tampered with!!")
 		return nil, errors.New("Data has been tampered with!")
 	}
-	master := userlib.Argon2Key([]byte(password), userlib.Hash([]byte(username)), 16)
 	hmacKey, _ := userlib.HashKDF(master, []byte("hmac"))
 	hmacKey = hmacKey[:16]
 	hmacCheck, _ := userlib.HMACEval(hmacKey, encJson)
 	if !userlib.HMACEqual(hmacCheck, hmac) {
-		panic("Data has been tampered with!!")
 		return nil, errors.New("Data has been tampered with!!")
-	}
-	unEncJson := decryptData(master, encJson)
-	errorExists := json.Unmarshal(unEncJson, userdataptr)
-	if errorExists != nil {
-		panic("incorrect password")
-		return nil, errors.New("incorrect password")
 	}
 	return userdataptr, nil
 }
@@ -840,7 +835,7 @@ func decryptData(key []byte, ciphertext []byte) ([]byte) {
 	// TODO: Add a check to ensure that ciphertext % blocksize == 0 before calling SymDec
 	paddedData := userlib.SymDec(key, ciphertext)
 	lenpadding := paddedData[len(paddedData) - 1]
-	userlib.DebugMsg("Bugged: %d and %d\n", len(paddedData), int(lenpadding))
+	//userlib.DebugMsg("Bugged: %d and %d\n", len(paddedData), int(lenpadding))
 	data := paddedData[:len(paddedData) - int(lenpadding)]
 	return data
 }
