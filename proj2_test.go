@@ -243,37 +243,156 @@ func TestAppendFile(t *testing.T) {
 	}
 }
 
-/*
-func TestRevokeFile(t *testing.T) {
-	clear()
-	u, err := InitUser("Alice", "Fubar")
-	if err != nil {
-		t.Error("Failed to initialize user", err)
-		return
-	}
-	u2, err2 := InitUser("bob", "foobar")
-	if err2 != nil {
-		t.Error("Failed to initialize bob", err2)
-		return
-	}
-	u3, err3 := InitUser("Joe", "foobar")
-	if err2 != nil {
-		t.Error("Failed to initialize bob", err2)
-		return
-	}
-	u4, err3 := InitUser("JoesChild", "foobar")
-	if err2 != nil {
-		t.Error("Failed to initialize bob", err2)
-		return
-	}
-	u5, err3 := InitUser("BobsChild", "foobar")
-	if err2 != nil {
-		t.Error("Failed to initialize bob", err2)
-		return
-	}
-
-	v := []byte("This is a test") //STORING FILE
-	u.StoreFile("file1", v)
-
+func TestShareThenAppend(t *testing.T) {
+	return
 }
-*/
+
+func TestShareAndReceiveAndRevokeBasic(t *testing.T) {
+	clear()
+
+	// initialize users
+	alice, err := InitUser("Alice", "Fubar")
+	if err != nil {
+		t.Error("Failed to initialize Alice", err)
+		return
+	}
+	bob, err2 := InitUser("Bob", "foobar")
+	if err2 != nil {
+		t.Error("Failed to initialize Bob", err2)
+		return
+	}
+	joe, err3 := InitUser("Joe", "foobar")
+	if err3 != nil {
+		t.Error("Failed to initialize Joe", err2)
+		return
+	}
+	joesChild, err3 := InitUser("JoesChild", "foobar")
+	if err2 != nil {
+		t.Error("Failed to initialize JoesChild", err2)
+		return
+	}
+	bobsChild, err3 := InitUser("BobsChild", "foobar")
+	if err2 != nil {
+		t.Error("Failed to initialize BobsChild", err2)
+		return
+	}
+
+	// store file
+	v := []byte("This is a test")
+	alice.StoreFile("file1", v)
+
+	// share and subsequently receive files
+	alice_bob_uuid, err := alice.ShareFile("file1", "Bob")
+	if err != nil {
+		t.Error("Alice was unable to share the file with Bob: ", err)
+	}
+	err = bob.ReceiveFile("file1", "Alice", alice_bob_uuid)
+	if err != nil {
+		t.Error("Bob was unable to receive the file from Alice: ", err)
+	}
+	alice_joe_uuid, err := alice.ShareFile("file1", "Joe")
+	if err != nil {
+		t.Error("Alice was unable to share the file with Joe: ", err)
+	}
+	err = joe.ReceiveFile("file1", "Alice", alice_joe_uuid)
+	if err != nil {
+		t.Error("Joe was unable to receive the file from Alice: ", err)
+	}
+	joe_joesChild_uuid, err := joe.ShareFile("file1", "JoesChild")
+	if err != nil {
+		t.Error("Joe was unable to share the file with JoesChild: ", err)
+	}
+	err = joesChild.ReceiveFile("file1", "Joe", joe_joesChild_uuid)
+	if err != nil {
+		t.Error("JoesChild was unable to receive the file from Joe: ", err)
+	}
+	bob_bobsChild_uuid, err := bob.ShareFile("file1", "BobsChild")
+	if err != nil {
+		t.Error("Bob was unable to share the file with BobsChild: ", err)
+	}
+	err = bobsChild.ReceiveFile("file1", "Bob", bob_bobsChild_uuid)
+	if err != nil {
+		t.Error("BobsChild was unable to receive the file from Bob")
+	}
+
+	// ensure everybody has access and file loads properly
+	alice_loaded_file, err := alice.LoadFile("file1")
+	if err != nil {
+		t.Error("Alice failed to download file 1.", err)
+		return
+	}
+	joe_loaded_file, err := joe.LoadFile("file1")
+	if err != nil {
+		t.Error("Joe failed to download file 1.", err)
+		return
+	}
+	bob_loaded_file, err := bob.LoadFile("file1")
+	if err != nil {
+		t.Error("Bob failed to download file 1.", err)
+		return
+	}
+	joesChild_loaded_file, err := joesChild.LoadFile("file1")
+	if err != nil {
+		t.Error("JoesChild failed to download file 1.", err)
+		return
+	}
+	bobsChild_loaded_file, err := bobsChild.LoadFile("file1")
+	if err != nil {
+		t.Error("BobsChild failed to download file 1.", err)
+		return
+	}
+
+	// check equality of all the files
+	if !reflect.DeepEqual(alice_loaded_file, joe_loaded_file) {
+		t.Error("Joe's shared file is not the same: ", alice_loaded_file, joe_loaded_file)
+		return
+	}
+	if !reflect.DeepEqual(alice_loaded_file, bob_loaded_file) {
+		t.Error("Bob's shared file is not the same: ", alice_loaded_file, bob_loaded_file)
+		return
+	}
+	if !reflect.DeepEqual(alice_loaded_file, joesChild_loaded_file) {
+		t.Error("JoesChild's shared file is not the same: ", alice_loaded_file, joesChild_loaded_file)
+		return
+	}
+	if !reflect.DeepEqual(alice_loaded_file, bobsChild_loaded_file) {
+		t.Error("BobsChild's shared file is not the same: ", alice_loaded_file, bobsChild_loaded_file)
+		return
+	}
+
+	// Revoke access from joe
+	err = alice.RevokeFile("file1", "Joe")
+	if err != nil {
+		t.Error("Unable to revoke file from Joe: ", err)
+	}
+	// alice_loaded_file, err = alice.LoadFile("file1")
+	// if err != nil {
+	// 	t.Error("Alice failed to download file 1 after revoking. ", err)
+	// 	return
+	// }
+	bob_loaded_file, err = bob.LoadFile("file1")
+	if err != nil {
+		t.Error("Bob failed to download file 1 after revoke.", err)
+		return
+	}
+	bobsChild_loaded_file, err = bobsChild.LoadFile("file1")
+	if err != nil {
+		t.Error("BobsChild failed to download file 1 after revoke.", err)
+		return
+	}
+	joe_loaded_file, err = joe.LoadFile("file1")
+	if err == nil {
+		t.Error("Joe was able to download file 1 after revoke: ", err)
+		return
+	}
+	joesChild_loaded_file, err = joesChild.LoadFile("file1")
+	if err == nil {
+		t.Error("JoesChild was able to download file 1 after revoke: ", err)
+		return
+	}
+}
+
+func TestRevokeThenReceive(t *testing.T) {
+	clear()
+	return
+}

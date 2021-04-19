@@ -636,6 +636,7 @@ func (userdata *User) RevokeFile(filename string, targetUsername string) (err er
 		}
 		currAppendNodeUUID = currAppendNode.NextPtr
 	}
+	
 	// reencrypt fileStruct
 	error = userdata.saveFileStruct(fileFrame.FileUUID, file, newSymmKey)
 	if error != nil {
