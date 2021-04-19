@@ -22,7 +22,7 @@ func clear() {
 	userlib.DatastoreClear()
 	userlib.KeystoreClear()
 }
-/*
+
 func TestInit(t *testing.T) {
 	clear()
 	t.Log("Initialization test")
@@ -42,7 +42,33 @@ func TestInit(t *testing.T) {
 	// write _ = u here to make the compiler happy
 	// You probably want many more tests here.
 }
-*/
+
+func TestIncorrectpassword(t *testing.T) {
+	clear()
+	t.Log("Incorrect Password test")
+
+	// You can set this to false!
+	userlib.SetDebugStatus(true)
+
+	_, err := InitUser("alice", "fubar")
+	_, err2 := GetUser("alice", "fubar1")
+	if err != nil {
+		// t.Error says the test fails
+		t.Error("Failed to initialize user", err)
+		return
+	}
+	if err2 == nil {
+		// t.Error says the test fails
+		t.Error("Should have errored", err2)
+		return
+	}
+	// t.Log() only produces output if you run with "go test -v"
+	t.Log("Successfuly errored", err2)
+	// If you want to comment the line above,
+	// write _ = u here to make the compiler happy
+	// You probably want many more tests here.
+}
+
 func TestCrypt(t *testing.T) {
 	clear()
 	t.Log("Encryption/Decryption test")
@@ -277,3 +303,66 @@ func TestRevokeFile(t *testing.T) {
 
 }
 */
+
+func TestMultipleUserInstances(t *testing.T) {
+	clear()
+	u, err := InitUser("alice25", "fubar")
+	if err != nil {
+		t.Error("Failed to initialize user", err)
+		return
+	}
+
+	uF, err2 := GetUser("alice25", "fubar")
+	if err2 != nil {
+		t.Error("Failed to initialize user2", err2)
+		return
+	}
+
+	v := []byte("This is a test")
+	u.StoreFile("file1", v)
+
+	v2, err2 := u.LoadFile("file1")
+	if err2 != nil {
+		t.Error("Failed to upload and download", err2)
+		return
+	}
+	if !reflect.DeepEqual(v, v2) {
+		t.Error("Downloaded file is not the same", v, v2)
+		return
+	}
+
+	v2, err2 = uF.LoadFile("file1")
+	if err2 != nil {
+		t.Error("Failed to upload and download", err2)
+		return
+	}
+	if !reflect.DeepEqual(v, v2) {
+		t.Error("Downloaded file is not the same", v, v2)
+		return
+	}
+
+	err = uF.AppendFile("file1", []byte("Hello"))
+	v = append([]byte("This is a test"), []byte("Hello")...)
+
+	v2, err2 = u.LoadFile("file1")
+	if err2 != nil {
+		t.Error("Failed to upload and download", err2)
+		return
+	}
+	if !reflect.DeepEqual(v, v2) {
+		t.Error("Downloaded file is not the same", v, v2)
+		return
+	}
+
+	v2, err2 = uF.LoadFile("file1")
+	if err2 != nil {
+		t.Error("Failed to upload and download", err2)
+		return
+	}
+	if !reflect.DeepEqual(v, v2) {
+		t.Error("Downloaded file is not the same", v, v2)
+		return
+	}
+
+
+}
