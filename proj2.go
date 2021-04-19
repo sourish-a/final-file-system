@@ -638,6 +638,8 @@ func (userdata *User) RevokeFile(filename string, targetUsername string) (err er
 		return error
 	}
 	fileFrame.SymmKey = newSymmKey
+	userdata.Namespace[string(userlib.Hash([]byte(filename)))] = fileFrame
+	userdata.storeUserdata()
 	return nil
 }
 
