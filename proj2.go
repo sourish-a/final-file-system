@@ -206,7 +206,7 @@ func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 			if somethingWrong == false {
 				return errors.New("Could not find file")
 			}
-			jsonFileStruct, tampering := verifyDecrypt(encFileStruct, fileframe.SymmKey)
+			jsonFileStruct, tampering := verifyDecrypt(fileframe.SymmKey, encFileStruct)
 			if tampering != nil {
 				return tampering
 			}
@@ -236,7 +236,6 @@ func (userdata *User) StoreFile(filename string, data []byte) (err error) {
 			jsonFile, _ := json.Marshal(file)
 			encFile := encHmac(fileframe.SymmKey, jsonFile)
 			userlib.DatastoreSet(fileframe.FileUUID, encFile)
-
 			
 		} else {
 			// if we are not the owner

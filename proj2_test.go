@@ -182,7 +182,7 @@ func TestShare(t *testing.T) {
 	}
 }
 
-func TestPUBLICSHARE(t *testing.T) {
+func TestSharingToUser(t *testing.T) {
 	clear()
 	u, err := InitUser("alice", "fubar")
 	if err != nil {
@@ -457,6 +457,34 @@ func TestShareAndReceiveAndRevokeBasic(t *testing.T) {
 		t.Error("JoesChild was able to download file 1 after revoke: ", err)
 		return
 	}
+}
+
+func TestReceiveIndepth (t *testing.T) {
+	clear()
+	t.Log("Receieve test")
+
+	// You can set this to false!
+
+	u, err := InitUser("alice", "fubar")
+	u2, _ := InitUser("bob", "foo")
+	if err != nil {
+		// t.Error says the test fails
+		t.Error("Failed to initialize user", err)
+		return
+	}
+
+	u.StoreFile("file1", []byte("this is a test"))
+	accessT, _ := u.ShareFile("file1", "bob")
+	u.StoreFile("file1", []byte("some overwritten stuff"))
+	u.AppendFile("file1", []byte("even more stuff appended"))
+	u2.ReceiveFile("file1", "alice", accessT)
+
+	_, err = u2.LoadFile("file1")
+	if err != nil {
+		t.Error("Failed to receieve file", err)
+		return
+	}
+	// t.Log() only produces output if you run with "go test -v"
 }
 
 func TestRevokeThenReceive(t *testing.T) {
